@@ -15,16 +15,21 @@ def normalize(img: np.ndarray):
         return (img.astype(np.float32) - img.min()) / range_values
 
 
-def segment_intersects_segment(a1, a2, b1, b2):
+def intersect_segments(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.ndarray) -> bool:
     """
-    NOTE: returns False if some of the end points lie on the other segment
+    Checks for intersection between segments a1---a2 and b1---b2.
+    a1, a2, b1 and b2 can also be arrays of points, in which case the function returns True if
+    any intersection is detected.
+    No intersection is reported if some of the end points lie on the other segment without crossing it.
     """
-
-    cb1 = np.cross(a2 - b1, b2 - b1)
-    cb2 = np.cross(a1 - b1, b2 - b1)
-    ca1 = np.cross(b2 - a1, a2 - a1)
-    ca2 = np.cross(b1 - a1, a2 - a1)
-    return ((cb1 > 0 > cb2) or (cb1 < 0 < cb2)) and ((ca1 > 0 > ca2) or (ca1 < 0 < ca2))
+    delta_a = a2 - a1
+    delta_b = b2 - b1
+    cb1 = np.cross(a2 - b1, delta_b)
+    cb2 = np.cross(a1 - b1, delta_b)
+    ca1 = np.cross(b2 - a1, delta_a)
+    ca2 = np.cross(b1 - a1, delta_a)
+    return np.any(
+        (((cb1 > 0) & (cb2 < 0)) | ((cb1 < 0) & (cb2 > 0))) & (((ca1 > 0) & (ca2 < 0)) | ((ca1 < 0) & (ca2 > 0))))
 
 
 def segment_intersects_contours(pt1, pt2, contours):
@@ -39,9 +44,8 @@ def segment_intersects_contours(pt1, pt2, contours):
 
     # FIXME: some intersections are not detected (it would seem only intra-contour) when using a small epsilon
     for contour in contours:
-        for i in range(len(contour) - 1):
-            if segment_intersects_segment(pt1, pt2, contour[i][0], contour[i + 1][0]):
-                return True
+        if intersect_segments(pt1, pt2, contour[:-1, 0], contour[1:, 0]):
+            return True
     return False
 
 
@@ -49,15 +53,18 @@ def extract_static_edges(contours):
     edges = []
     for ci in range(len(contours)):
         contour_i = np.squeeze(contours[ci])
-        for cj in range(ci, len(contours)):
-            contour_j = np.squeeze(contours[cj])
-            for i in range(len(contour_i)):
+        for i in range(len(contour_i)):
+            ui = contour_i[i - 1 if i > 0 else len(contour_i) - 1] - contour_i[i]
+            vi = contour_i[i + 1 if i < len(contour_i) - 1 else 0] - contour_i[i]
+            # Filter out concave vertices
+            if np.cross(ui, vi) < 0:
+                continue
+            for cj in range(ci, len(contours)):
+                contour_j = np.squeeze(contours[cj])
                 j0 = i + 1 if ci == cj else 0
                 for j in range(j0, len(contour_j)):
                     # TODO: we might be able to reduce the amount of work
                     #  here by using some algebra, and leverage numpy's functions
-                    ui = contour_i[i - 1 if i > 0 else len(contour_i) - 1] - contour_i[i]
-                    vi = contour_i[i + 1 if i < len(contour_i) - 1 else 0] - contour_i[i]
                     uj = contour_j[j - 1 if j > 0 else len(contour_j) - 1] - contour_j[j]
                     vj = contour_j[j + 1 if j < len(contour_j) - 1 else 0] - contour_j[j]
 
@@ -65,7 +72,7 @@ def extract_static_edges(contours):
                     # the bottom.
 
                     # Filter out concave vertices
-                    if np.cross(ui, vi) < 0 or np.cross(uj, vj) < 0:
+                    if np.cross(uj, vj) < 0:
                         continue
 
                     t = contour_j[j] - contour_i[i]
@@ -91,7 +98,7 @@ def extract_static_edges(contours):
     return edges
 
 
-def extract_dynamic_edges(contours, point: np.ndarray):
+def extract_dynamic_edges(contours, point):
     edges = []
     for cj in range(len(contours)):
         contour_j = np.squeeze(contours[cj])
