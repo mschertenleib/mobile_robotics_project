@@ -299,5 +299,5 @@ def floodfill_background():
 
 
 if __name__ == '__main__':
-    #main()
-    floodfill_background()
+    main()
+    #floodfill_background()
