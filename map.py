@@ -15,7 +15,7 @@ def normalize(img: np.ndarray):
         return (img.astype(np.float32) - img.min()) / range_values
 
 
-def intersect_segments(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.ndarray) -> bool:
+def intersect_segments_open(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.ndarray) -> bool:
     """
     Checks for intersection between segments a1---a2 and b1---b2.
     a1, a2, b1 and b2 can also be arrays of points, in which case the function returns True if
@@ -32,6 +32,27 @@ def intersect_segments(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.nd
         (((cb1 > 0) & (cb2 < 0)) | ((cb1 < 0) & (cb2 > 0))) & (((ca1 > 0) & (ca2 < 0)) | ((ca1 < 0) & (ca2 > 0))))
 
 
+def intersect_segments_closed(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.ndarray) -> bool:
+    """
+    Checks for intersection between segments a1---a2 and b1---b2.
+    a1, a2, b1 and b2 can also be arrays of points, in which case the function returns True if
+    any intersection is detected.
+    Any contact between the two segments is reported as an intersection
+    """
+    # TODO: there seems to be a lot of logic happening in np.cross(), whereas np.dot() seems to directly forward the
+    #  call to the underlying C implementation (?). Since, in 2D, cross(u, v) is just dot([-u[1], u[0]], v),
+    #  it might be a good idea to benchmark the two and see if we could gain some performance there.
+    delta_a = a2 - a1
+    delta_b = b2 - b1
+    cb1 = np.cross(a2 - b1, delta_b)
+    cb2 = np.cross(a1 - b1, delta_b)
+    ca1 = np.cross(b2 - a1, delta_a)
+    ca2 = np.cross(b1 - a1, delta_a)
+    return np.any(
+        (((cb1 >= 0) & (cb2 <= 0)) | ((cb1 <= 0) & (cb2 >= 0))) & (
+                    ((ca1 >= 0) & (ca2 <= 0)) | ((ca1 <= 0) & (ca2 >= 0))))
+
+
 def intersect_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> bool:
     # NOTE: it is very important here that segment_intersects_segment() returns False when two segments only
     # touch but do not cross. If that was not the case (ie. if it returned True), we would have to consider
@@ -42,10 +63,16 @@ def intersect_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> bool:
     # contour while always staying inside; it would always cross the contour at some point, and hence be
     # detected as intersecting.
 
+    # NOTE (updated): well this comment aged well. Actually we want to check for intersection with the border,
+    # and just omit the check for the point where the edge originates from. It does not actually complexify the
+    # logic, because it will naturally remove at least one special case (I think). It should also completely avoid
+    # partial edge duplication, which is not fundamentally a problem for our use case, but it is nice if we can avoid
+    # it anyway.
+
     for contour in contours:
-        if intersect_segments(pt1, pt2, contour[:-1, 0], contour[1:, 0]):
+        if intersect_segments_open(pt1, pt2, contour[:-1, 0], contour[1:, 0]):
             return True
-        if intersect_segments(pt1, pt2, contour[-1, 0], contour[0, 0]):
+        if intersect_segments_open(pt1, pt2, contour[-1, 0], contour[0, 0]):
             return True
     return False
 
@@ -91,7 +118,7 @@ def extract_static_edges(contours, obstacle_mask):
                     if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
                         continue
 
-                    if True:  # Use bitmap intersection check
+                    if False:  # Use bitmap intersection check
                         cv2.line(line_img, contour_i[i], contour_j[j], color=[1])
                         if np.any(line_img & obstacle_mask):
                             line_img = np.zeros(obstacle_mask.shape, dtype=np.uint8)
@@ -291,7 +318,7 @@ def floodfill_background():
     _, img, mask, _ = cv2.floodFill(img, mask=np.array([], dtype=np.uint8), seedPoint=seed_point, newVal=0, loDiff=2,
                                     upDiff=2, flags=cv2.FLOODFILL_MASK_ONLY)
     # TOOD: actually use the mask here
-    #_, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY)
+    # _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY)
     image_info(mask)
     cv2.imshow('main', np.where(mask[1:-1, 1:-1], img, 0))
     cv2.waitKey(0)
@@ -300,4 +327,12 @@ def floodfill_background():
 
 if __name__ == '__main__':
     main()
-    #floodfill_background()
+    # floodfill_background()
+
+    """
+    a1 = np.array([3.7, -1.9])
+    a2 = np.array([10.67, -5.09])
+    b1 = np.array([3.7, -1.9])
+    b2 = np.array([3.14, 7.5])
+    print(intersect_segments_closed(a1, a2, b1, b2))
+    """
