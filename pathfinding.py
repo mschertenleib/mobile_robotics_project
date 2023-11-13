@@ -32,6 +32,7 @@ def dijkstra(graph: list[list[Edge]], source: int, target: int):
 
         unvisited.remove(u)
 
+        # FIXME: the line below should not involve any kind of search through unvisited
         for edge in [edge for edge in graph[u] if edge.vertex in unvisited]:
             alt = dist[u] + edge.length
             if alt < dist[edge.vertex]:
@@ -58,18 +59,18 @@ def reconstruct_path(prev: list[int], source: int, target: int) -> list[int]:
     return path
 
 
-def main():
-    graph = [[Edge(1, 7), Edge(2, 9), Edge(5, 14)],
-             [Edge(0, 7), Edge(2, 10), Edge(3, 15)],
-             [Edge(0, 9), Edge(1, 10), Edge(3, 11), Edge(5, 2)],
-             [Edge(1, 15), Edge(2, 11), Edge(4, 6)],
-             [Edge(3, 6), Edge(5, 9)],
-             [Edge(0, 14), Edge(2, 2), Edge(4, 9)]]
-    source = 0
-    target = 4
-    path = dijkstra(graph, source, target)
-    print(path)
-
-
 if __name__ == '__main__':
+    def main():
+        graph = [[Edge(1, 7), Edge(2, 9), Edge(5, 14)],
+                 [Edge(0, 7), Edge(2, 10), Edge(3, 15)],
+                 [Edge(0, 9), Edge(1, 10), Edge(3, 11), Edge(5, 2)],
+                 [Edge(1, 15), Edge(2, 11), Edge(4, 6)],
+                 [Edge(3, 6), Edge(5, 9)],
+                 [Edge(0, 14), Edge(2, 2), Edge(4, 9)]]
+        source = 0
+        target = 4
+        path = dijkstra(graph, source, target)
+        print(path)
+
+
     main()
