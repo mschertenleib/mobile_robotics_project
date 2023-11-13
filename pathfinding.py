@@ -20,20 +20,21 @@ def dijkstra(graph: list[list[Edge]], source: int, target: int):
     assert 0 <= source < vertex_count
     assert 0 <= target < vertex_count
 
-    dist: list[float] = [np.inf] * vertex_count
-    prev: list[int] = [-1] * vertex_count
-    unvisited: list[int] = [i for i in range(vertex_count)]
+    dist = np.full(vertex_count, np.inf, dtype=float)
+    prev = np.full(vertex_count, -1, dtype=int)
+    visited = np.zeros(vertex_count, dtype=bool)
+    unvisited_count = vertex_count
     dist[source] = 0.0
 
-    while len(unvisited) > 0:
-        u = min(unvisited, key=lambda v: dist[v])
+    while unvisited_count > 0:
+        u = np.ma.MaskedArray(dist, visited).argmin()
         if u == target:
             break
 
-        unvisited.remove(u)
+        visited[u] = True
+        unvisited_count -= 1
 
-        # FIXME: the line below should not involve any kind of search through unvisited
-        for edge in [edge for edge in graph[u] if edge.vertex in unvisited]:
+        for edge in [edge for edge in graph[u] if not visited[edge.vertex]]:
             alt = dist[u] + edge.length
             if alt < dist[edge.vertex]:
                 dist[edge.vertex] = alt
@@ -42,7 +43,7 @@ def dijkstra(graph: list[list[Edge]], source: int, target: int):
     return reconstruct_path(prev, source, target)
 
 
-def reconstruct_path(prev: list[int], source: int, target: int) -> list[int]:
+def reconstruct_path(prev, source: int, target: int) -> list[int]:
     if target == source:
         return [target]
 
@@ -69,6 +70,7 @@ if __name__ == '__main__':
                  [Edge(0, 14), Edge(2, 2), Edge(4, 9)]]
         source = 0
         target = 4
+        # Correct path for the above: [0, 2, 5, 4]
         path = dijkstra(graph, source, target)
         print(path)
 

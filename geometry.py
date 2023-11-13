@@ -190,7 +190,7 @@ def draw_contour_orientations(img, contours, orientations):
 
 def main():
     threshold = 200
-    kernel_size = 25
+    kernel_size = 50
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
     start_point = (200, 100)
