@@ -259,13 +259,45 @@ def main():
         cv2.line(img, edge[0], edge[1], color=(64, 64, 192))
     cv2.circle(img, start_point, color=(64, 192, 64), radius=6, thickness=-1)
     cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
-    img = normalize(img)
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', img.shape[1], img.shape[0])
-    cv2.imshow('main', img)
+    cv2.imshow('main', normalize(img))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+mouse_x, mouse_y = 0, 0
+
+
+def on_click(event, x, y, flags, param):
+    global mouse_x, mouse_y
+    if event == cv2.EVENT_LBUTTONDOWN:
+        mouse_x, mouse_y = x, y
+
+
+def floodfill_background():
+    img = cv2.imread('map.png')
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('main', img.shape[1], img.shape[0])
+    cv2.setMouseCallback('main', on_click)
+    cv2.imshow('main', normalize(img))
+    cv2.waitKey(0)
+
+    # Not sure this would actually work well...
+    global mouse_x, mouse_y
+    seed_point = (mouse_x, mouse_y)
+    _, img, mask, _ = cv2.floodFill(img, mask=np.array([], dtype=np.uint8), seedPoint=seed_point, newVal=0, loDiff=2,
+                                    upDiff=2, flags=cv2.FLOODFILL_MASK_ONLY)
+    # TOOD: actually use the mask here
+    #_, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY)
+    image_info(mask)
+    cv2.imshow('main', np.where(mask[1:-1, 1:-1], img, 0))
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
-    main()
+    #main()
+    floodfill_background()
