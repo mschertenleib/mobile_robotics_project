@@ -9,6 +9,12 @@ def transform(matrix, point):
     return transformed[0:2] / transformed[2]
 
 
+def draw_thymio(img, position: np.ndarray, angle: float):
+    rot = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    points = position.astype(float) + (rot @ Thymio.outline.T).T
+    cv2.polylines(img, [points.astype(int)], isClosed=True, color=(255, 255, 255))
+
+
 def correct_perspective():
     img = cv2.imread('perspective_box.jpg')
     assert img is not None
@@ -37,24 +43,21 @@ def correct_perspective():
 def reconstruct_thymio():
     img = np.zeros((400, 400, 3), dtype=np.uint8)
     # TODO: convert to HSV for detecting dots? But might actually be worse
+
     tip = np.float32([200, 140])
-    base = np.float32([50, 300])
-    dir = tip - base
-    dir /= np.linalg.norm(dir)
-    left = base - np.array([-dir[1], dir[0]]) * 50
-    right = base + np.array([-dir[1], dir[0]]) * 50
-    points = np.array([tip, left, right], dtype=np.int32)
-    # TODO: it might actually be better to simply reconstruct the middle point from the left and right (we can detect
-    #  which one is the tip because it is the furthest away from all others), and directly use that to reconstruct
-    #  the position and orientation, without the need to do a line fit
-    [vx, vy, x, y] = cv2.fitLine(points, distType=cv2.DIST_L2, param=0, reps=0.01, aeps=0.01)
-    pt1 = (np.array([x, y]).squeeze() - np.array([vx, vy]).squeeze() * 600).astype(int)
-    pt2 = (np.array([x, y]).squeeze() + np.array([vx, vy]).squeeze() * 600).astype(int)
-    cv2.line(img, pt1, pt2, color=(255, 255, 255))
+    left = np.float32([180, 280])
+    right = np.float32([300, 250])
+    center = (left + right) * 0.5
+
+    cv2.line(img, center.astype(int), tip.astype(int), color=(255, 255, 255))
     cv2.circle(img, center=tip.astype(int), radius=5, color=(255, 0, 0), thickness=-1)
-    cv2.circle(img, center=base.astype(int), radius=5, color=(0, 255, 255), thickness=-1)
     cv2.circle(img, center=left.astype(int), radius=5, color=(0, 0, 255), thickness=-1)
     cv2.circle(img, center=right.astype(int), radius=5, color=(0, 255, 0), thickness=-1)
+    cv2.circle(img, center=center.astype(int), radius=5, color=(255, 255, 255), thickness=-1)
+
+    dir = tip - center
+    draw_thymio(img, center, 0)  # TODO angle
+
     cv2.imshow('main', img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
