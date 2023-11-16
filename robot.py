@@ -2,25 +2,27 @@ import numpy as np
 
 
 class Thymio:
+    # All distances are in mm, angles in radians
+    outline = np.array([[-55, -55],
+                        [55, -55],
+                        [55, 30],
+                        [47, 38],
+                        [25, 49],
+                        [0, 55],
+                        [-24, 50],
+                        [-46, 39],
+                        [-55, 30],
+                        [-55, -55]])
+    sensor_angles = np.radians(np.array([120, 105, 90, 75, 60, -90, -90]))
+    sensor_pos = np.array([[-46, 39],
+                           [-24, 50],
+                           [0, 55],
+                           [25, 49],
+                           [47, 38],
+                           [30, -55],
+                           [-30, -55]])
+
     def __init__(self):
-        self._pos_x = 0
-        self._pos_y = 0
-        self._theta = 0
-        self._outline = np.array([[-5.5, -5.5],
-                                  [5.5, -5.5],
-                                  [5.5, 3.0],
-                                  [4.7, 3.8],
-                                  [2.5, 4.9],
-                                  [0.0, 5.5],
-                                  [-2.4, 5.0],
-                                  [-4.6, 3.9],
-                                  [-5.5, 3.0],
-                                  [-5.5, -5.5]])
-        self._sensor_angles = np.array([120, 105, 90, 75, 60, -90, -90]) * np.pi / 180
-        self._sensor_pos = np.array([[-4.6, 3.9],
-                                     [-2.4, 5.0],
-                                     [0.0, 5.5],
-                                     [2.5, 4.9],
-                                     [4.7, 3.8],
-                                     [3.0, -5.5],
-                                     [-3.0, -5.5]])
+        self.pos_x = 0
+        self.pos_y = 0
+        self.theta = 0
