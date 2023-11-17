@@ -16,7 +16,7 @@ def draw_thymio(img, position: np.ndarray, angle: float):
 
 
 def correct_perspective():
-    img = cv2.imread('perspective_box.jpg')
+    img = cv2.imread('../perspective_box.jpg')
     assert img is not None
     img = cv2.resize(img, (img.shape[1] // 8, img.shape[0] // 8))
 

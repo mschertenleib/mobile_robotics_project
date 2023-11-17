@@ -222,7 +222,7 @@ def main():
     approx_poly_epsilon = 2
     start_point = (200, 100)
     target_point = (120, 730)
-    original_img = cv2.imread('map.png')
+    original_img = cv2.imread('../map.png')
     img = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
@@ -303,7 +303,7 @@ def on_click(event, x, y, flags, param):
 
 
 def floodfill_background():
-    img = cv2.imread('map.png')
+    img = cv2.imread('../map.png')
     img = cv2.cv2tColor(img, cv2.COLOR_BGR2GRAY)
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
