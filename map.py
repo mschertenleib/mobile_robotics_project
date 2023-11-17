@@ -1,4 +1,4 @@
-import cv2 as cv
+import cv2
 import numpy as np
 
 
@@ -119,7 +119,7 @@ def extract_static_edges(contours, obstacle_mask):
                         continue
 
                     if False:  # Use bitmap intersection check
-                        cv.line(line_img, contour_i[i], contour_j[j], color=[1])
+                        cv2.line(line_img, contour_i[i], contour_j[j], color=[1])
                         if np.any(line_img & obstacle_mask):
                             line_img = np.zeros(obstacle_mask.shape, dtype=np.uint8)
                             continue
@@ -190,7 +190,7 @@ def extract_dynamic_edges(contours, obstacle_mask, point):
             if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
                 continue
 
-            cv.line(line_img, point, contour_j[j], color=[1])
+            cv2.line(line_img, point, contour_j[j], color=[1])
             if np.any(line_img & obstacle_mask):
                 line_img = np.zeros(obstacle_mask.shape, dtype=np.uint8)
                 continue
@@ -208,11 +208,11 @@ def draw_contour_orientations(img, contours, orientations):
     img[:] = (192, 192, 192)
     for c in range(len(contours)):
         color = (64, 192, 64) if orientations[c] >= 0 else (64, 64, 192)
-        cv.drawContours(img, [contours[c]], contourIdx=-1, color=color, thickness=3)
+        cv2.drawContours(img, [contours[c]], contourIdx=-1, color=color, thickness=3)
         n_points = len(contours[c])
         for i in range(n_points):
             brightness = i / (n_points - 1) * 255
-            cv.circle(img, contours[c][i][0], color=(brightness, brightness, brightness), radius=5, thickness=-1)
+            cv2.circle(img, contours[c][i][0], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
 def main():
@@ -222,12 +222,12 @@ def main():
     approx_poly_epsilon = 2
     start_point = (200, 100)
     target_point = (120, 730)
-    original_img = cv.imread('map.png')
-    img = cv.cvtColor(original_img, cv.COLOR_BGR2GRAY)
-    _, img = cv.threshold(img, threshold, 1, cv.THRESH_BINARY_INV)
-    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE,
+    original_img = cv2.imread('map.png')
+    img = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
+    _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
                                        (kernel_size, kernel_size))
-    img = cv.dilate(img, kernel)
+    img = cv2.dilate(img, kernel)
 
     # Flood fill from the robot location, so we only get the contours that
     # are relevant. Note that this requires to know the position of the robot
@@ -235,24 +235,24 @@ def main():
     # regions across which the robot might get kidnapped
     mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), dtype=np.uint8)
     assert img[start_point[::-1]] == 0, 'Flood fill seed point is not in free space'
-    _, img, _, _ = cv.floodFill(img, mask=mask,
+    _, img, _, _ = cv2.floodFill(img, mask=mask,
                                  seedPoint=start_point, newVal=2)
-    _, img = cv.threshold(img, thresh=1, maxval=1, type=cv.THRESH_BINARY_INV)
+    _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY_INV)
 
     # NOTE: using RETR_EXTERNAL means we would only get the outer contours,
     # which is basically equivalent to floodfilling the binary image from the
     # outside prior to calling findContours. However, this assumes our region
     # of interest is "outside", and would not work if we are "walled in",
     # which is actually very likely
-    contours, hierarchy = cv.findContours(img, mode=cv.RETR_LIST,
-                                           method=cv.CHAIN_APPROX_SIMPLE)
-    contours = [cv.approxPolyDP(contour, epsilon=approx_poly_epsilon, closed=True) for contour in contours]
+    contours, hierarchy = cv2.findContours(img, mode=cv2.RETR_LIST,
+                                           method=cv2.CHAIN_APPROX_SIMPLE)
+    contours = [cv2.approxPolyDP(contour, epsilon=approx_poly_epsilon, closed=True) for contour in contours]
 
     # NOTE: orientation is positive for a clockwise contour, which is the opposite of the mathematical standard
     # (right-hand rule). Note however that the outer contour of a shape is always
     # counter-clockwise (hence orientation is negative), and the contour of a hole is always clockwise (hence
     # orientation is positive).
-    orientations = [np.sign(cv.contourArea(contour, oriented=True)) for contour in contours]
+    orientations = [np.sign(cv2.contourArea(contour, oriented=True)) for contour in contours]
 
     # If we know that 'contours' only contains those in the region where the
     # robot is located, we can use them directly for computing the visibility
@@ -260,14 +260,14 @@ def main():
 
     walkable = np.zeros(original_img.shape, dtype=np.uint8)
     walkable[:] = (192, 64, 64)
-    cv.drawContours(walkable, contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
-    img = cv.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
-    cv.drawContours(img, contours, contourIdx=-1, color=(192, 64, 64))
+    cv2.drawContours(walkable, contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
+    img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
+    cv2.drawContours(img, contours, contourIdx=-1, color=(192, 64, 64))
 
     obstacle_mask = np.zeros(original_img.shape[0:2], dtype=np.uint8)
-    cv.drawContours(obstacle_mask, contours, contourIdx=-1, color=[1])
+    cv2.drawContours(obstacle_mask, contours, contourIdx=-1, color=[1])
     mask = np.zeros((obstacle_mask.shape[0] + 2, obstacle_mask.shape[1] + 2), dtype=np.uint8)
-    _, obstacle_mask, _, _ = cv.floodFill(obstacle_mask, mask=mask, seedPoint=start_point, newVal=[1])
+    _, obstacle_mask, _, _ = cv2.floodFill(obstacle_mask, mask=mask, seedPoint=start_point, newVal=[1])
     assert np.min(obstacle_mask) == 0
     assert np.max(obstacle_mask) == 1
     obstacle_mask = 1 - obstacle_mask
@@ -279,18 +279,18 @@ def main():
     print(f'Number of dynamic edges: {len(start_edges) + len(target_edges)}')
 
     for edge in edges:
-        cv.line(img, edge[0], edge[1], color=(0, 0, 0))
+        cv2.line(img, edge[0], edge[1], color=(0, 0, 0))
     for edge in start_edges:
-        cv.line(img, edge[0], edge[1], color=(64, 192, 64))
+        cv2.line(img, edge[0], edge[1], color=(64, 192, 64))
     for edge in target_edges:
-        cv.line(img, edge[0], edge[1], color=(64, 64, 192))
-    cv.circle(img, start_point, color=(64, 192, 64), radius=6, thickness=-1)
-    cv.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
-    cv.namedWindow('main', cv.WINDOW_NORMAL)
-    cv.resizeWindow('main', img.shape[1], img.shape[0])
-    cv.imshow('main', normalize(img))
-    cv.waitKey(0)
-    cv.destroyAllWindows()
+        cv2.line(img, edge[0], edge[1], color=(64, 64, 192))
+    cv2.circle(img, start_point, color=(64, 192, 64), radius=6, thickness=-1)
+    cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
+    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('main', img.shape[1], img.shape[0])
+    cv2.imshow('main', normalize(img))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 
 mouse_x, mouse_y = 0, 0
@@ -298,31 +298,31 @@ mouse_x, mouse_y = 0, 0
 
 def on_click(event, x, y, flags, param):
     global mouse_x, mouse_y
-    if event == cv.EVENT_LBUTTONDOWN:
+    if event == cv2.EVENT_LBUTTONDOWN:
         mouse_x, mouse_y = x, y
 
 
 def floodfill_background():
-    img = cv.imread('map.png')
-    img = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    img = cv2.imread('map.png')
+    img = cv2.cv2tColor(img, cv2.COLOR_BGR2GRAY)
 
-    cv.namedWindow('main', cv.WINDOW_NORMAL)
-    cv.resizeWindow('main', img.shape[1], img.shape[0])
-    cv.setMouseCallback('main', on_click)
-    cv.imshow('main', normalize(img))
-    cv.waitKey(0)
+    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('main', img.shape[1], img.shape[0])
+    cv2.setMouseCallback('main', on_click)
+    cv2.imshow('main', normalize(img))
+    cv2.waitKey(0)
 
     # Not sure this would actually work well...
     global mouse_x, mouse_y
     seed_point = (mouse_x, mouse_y)
-    _, img, mask, _ = cv.floodFill(img, mask=np.array([], dtype=np.uint8), seedPoint=seed_point, newVal=0, loDiff=2,
-                                    upDiff=2, flags=cv.FLOODFILL_MASK_ONLY)
+    _, img, mask, _ = cv2.floodFill(img, mask=np.array([], dtype=np.uint8), seedPoint=seed_point, newVal=0, loDiff=2,
+                                    upDiff=2, flags=cv2.FLOODFILL_MASK_ONLY)
     # TOOD: actually use the mask here
-    # _, img = cv.threshold(img, thresh=1, maxval=1, type=cv.THRESH_BINARY)
+    # _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY)
     image_info(mask)
-    cv.imshow('main', np.where(mask[1:-1, 1:-1], img, 0))
-    cv.waitKey(0)
-    cv.destroyAllWindows()
+    cv2.imshow('main', np.where(mask[1:-1, 1:-1], img, 0))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':

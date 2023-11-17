@@ -1,6 +1,6 @@
 from robot import *
 
-import cv2 as cv
+import cv2
 import numpy as np
 
 
@@ -12,32 +12,32 @@ def transform(matrix, point):
 def draw_thymio(img, position: np.ndarray, angle: float):
     rot = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
     points = position.astype(float) + (rot @ Thymio.outline.T).T
-    cv.polylines(img, [points.astype(int)], isClosed=True, color=(255, 255, 255))
+    cv2.polylines(img, [points.astype(int)], isClosed=True, color=(255, 255, 255))
 
 
 def correct_perspective():
-    img = cv.imread('perspective_box.jpg')
+    img = cv2.imread('perspective_box.jpg')
     assert img is not None
-    img = cv.resize(img, (img.shape[1] // 8, img.shape[0] // 8))
+    img = cv2.resize(img, (img.shape[1] // 8, img.shape[0] // 8))
 
     pts_src = np.float32([[226, 173], [408, 273], [78, 275], [258, 424]])
     dst_width = 146 * 4
     dst_height = 126 * 4
     pts_dst = np.float32([[0, 0], [dst_width, 0], [0, dst_height], [dst_width, dst_height]])
-    matrix = cv.getPerspectiveTransform(pts_src, pts_dst)
+    matrix = cv2.getPerspectiveTransform(pts_src, pts_dst)
     inv_matrix = np.linalg.inv(matrix)
 
     for pt in pts_src:
-        cv.circle(img, center=pt.astype(int), radius=5, color=(0, 0, 255), thickness=-1)
+        cv2.circle(img, center=pt.astype(int), radius=5, color=(0, 0, 255), thickness=-1)
     center = transform(inv_matrix, [dst_width / 3, dst_height / 3]).astype(int)
-    cv.circle(img, center=center, radius=5, color=(255, 0, 0), thickness=-1)
-    cv.imshow('main', img)
-    cv.waitKey(0)
+    cv2.circle(img, center=center, radius=5, color=(255, 0, 0), thickness=-1)
+    cv2.imshow('main', img)
+    cv2.waitKey(0)
 
-    img = cv.warpPerspective(img, matrix, (dst_width, dst_height))
-    cv.imshow('main', img)
-    cv.waitKey(0)
-    cv.destroyAllWindows()
+    img = cv2.warpPerspective(img, matrix, (dst_width, dst_height))
+    cv2.imshow('main', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 
 def reconstruct_thymio():
@@ -49,18 +49,18 @@ def reconstruct_thymio():
     right = np.float32([300, 250])
     center = (left + right) * 0.5
 
-    cv.line(img, center.astype(int), tip.astype(int), color=(255, 255, 255))
-    cv.circle(img, center=tip.astype(int), radius=5, color=(255, 0, 0), thickness=-1)
-    cv.circle(img, center=left.astype(int), radius=5, color=(0, 0, 255), thickness=-1)
-    cv.circle(img, center=right.astype(int), radius=5, color=(0, 255, 0), thickness=-1)
-    cv.circle(img, center=center.astype(int), radius=5, color=(255, 255, 255), thickness=-1)
+    cv2.line(img, center.astype(int), tip.astype(int), color=(255, 255, 255))
+    cv2.circle(img, center=tip.astype(int), radius=5, color=(255, 0, 0), thickness=-1)
+    cv2.circle(img, center=left.astype(int), radius=5, color=(0, 0, 255), thickness=-1)
+    cv2.circle(img, center=right.astype(int), radius=5, color=(0, 255, 0), thickness=-1)
+    cv2.circle(img, center=center.astype(int), radius=5, color=(255, 255, 255), thickness=-1)
 
     dir = tip - center
     draw_thymio(img, center, 0)  # TODO angle
 
-    cv.imshow('main', img)
-    cv.waitKey(0)
-    cv.destroyAllWindows()
+    cv2.imshow('main', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
