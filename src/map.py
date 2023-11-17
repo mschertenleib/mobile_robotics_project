@@ -15,71 +15,38 @@ def normalize(img: np.ndarray):
         return (img.astype(np.float32) - img.min()) / range_values
 
 
-def intersect_segments_open(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.ndarray) -> bool:
+def intersect_segments(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.ndarray) -> bool:
     """
-    Checks for intersection between segments a1---a2 and b1---b2.
-    a1, a2, b1 and b2 can also be arrays of points, in which case the function returns True if
-    any intersection is detected.
-    No intersection is reported if some of the end points lie on the other segment without crossing it.
+    Checks for an intersection between the half-open segment ]a1---a2] and closed segment [b1---b2].
+    b1 and b2 can be Nx2 arrays, in which case the function returns True if any intersection is detected.
     """
     delta_a = a2 - a1
     delta_b = b2 - b1
-    cb1 = np.cross(a2 - b1, delta_b)
-    cb2 = np.cross(a1 - b1, delta_b)
-    ca1 = np.cross(b2 - a1, delta_a)
-    ca2 = np.cross(b1 - a1, delta_a)
+    c_b1a2_b1b2 = np.cross(a2 - b1, delta_b)
+    c_b1a1_b1b2 = np.cross(a1 - b1, delta_b)
+    c_a1b2_a1a2 = np.cross(b2 - a1, delta_a)
+    c_a1b1_a1a2 = np.cross(b1 - a1, delta_a)
     return np.any(
-        (((cb1 > 0) & (cb2 < 0)) | ((cb1 < 0) & (cb2 > 0))) & (((ca1 > 0) & (ca2 < 0)) | ((ca1 < 0) & (ca2 > 0))))
-
-
-def intersect_segments_closed(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.ndarray) -> bool:
-    """
-    Checks for intersection between segments a1---a2 and b1---b2.
-    a1, a2, b1 and b2 can also be arrays of points, in which case the function returns True if
-    any intersection is detected.
-    Any contact between the two segments is reported as an intersection
-    """
-    # TODO: there seems to be a lot of logic happening in np.cross(), whereas np.dot() seems to directly forward the
-    #  call to the underlying C implementation (?). Since, in 2D, cross(u, v) is just dot([-u[1], u[0]], v),
-    #  it might be a good idea to benchmark the two and see if we could gain some performance there.
-    delta_a = a2 - a1
-    delta_b = b2 - b1
-    cb1 = np.cross(a2 - b1, delta_b)
-    cb2 = np.cross(a1 - b1, delta_b)
-    ca1 = np.cross(b2 - a1, delta_a)
-    ca2 = np.cross(b1 - a1, delta_a)
-    return np.any(
-        (((cb1 >= 0) & (cb2 <= 0)) | ((cb1 <= 0) & (cb2 >= 0))) & (
-                    ((ca1 >= 0) & (ca2 <= 0)) | ((ca1 <= 0) & (ca2 >= 0))))
+        (((c_b1a2_b1b2 >= 0) & (c_b1a1_b1b2 < 0)) | ((c_b1a2_b1b2 <= 0) & (c_b1a1_b1b2 > 0))) & (
+                ((c_a1b2_a1a2 > 0) & (c_a1b1_a1a2 < 0)) | ((c_a1b2_a1a2 < 0) & (c_a1b1_a1a2 > 0))))
 
 
 def intersect_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> bool:
-    # NOTE: it is very important here that segment_intersects_segment() returns False when two segments only
-    # touch but do not cross. If that was not the case (ie. if it returned True), we would have to consider
-    # the special case when intersecting an end point with the contour it comes from. Also, due to the kind
-    # of vertices we reject prior to doing intersection, we have a second property "for free": any segment
-    # between two (non rejected) vertices of a contour, which would intersect said contour, has to cross one
-    # its edges. In other words, we can not have a segment that simply connects two opposite vertices of a
-    # contour while always staying inside; it would always cross the contour at some point, and hence be
-    # detected as intersecting.
-
-    # NOTE (updated): well this comment aged well. Actually we want to check for intersection with the border,
-    # and just omit the check for the point where the edge originates from. It does not actually complexify the
-    # logic, because it will naturally remove at least one special case (I think). It should also completely avoid
-    # partial edge duplication, which is not fundamentally a problem for our use case, but it is nice if we can avoid
-    # it anyway.
-
+    """
+    Checks for an intersection between the half-open segment ]pt1---pt2] and all contours.
+    """
     for contour in contours:
-        if intersect_segments_open(pt1, pt2, contour[:-1, 0], contour[1:, 0]):
+        if intersect_segments(pt1, pt2, contour[:-1, 0], contour[1:, 0]):
             return True
-        if intersect_segments_open(pt1, pt2, contour[-1, 0], contour[0, 0]):
+        if intersect_segments(pt1, pt2, contour[-1, 0], contour[0, 0]):
             return True
     return False
 
 
-def extract_static_edges(contours, obstacle_mask):
+def extract_static_edges(contours):
+    # FIXME: there are still some cases where an intersection is not detected
+
     edges = []
-    line_img = np.zeros(obstacle_mask.shape, dtype=np.uint8)
     for ci in range(len(contours)):
         contour_i = np.squeeze(contours[ci])
         for i in range(len(contour_i)):
@@ -94,6 +61,7 @@ def extract_static_edges(contours, obstacle_mask):
                 for j in range(j0, len(contour_j)):
                     # TODO: we might be able to reduce the amount of work
                     #  here by using some algebra, and leverage numpy's functions
+
                     uj = contour_j[j - 1 if j > 0 else len(contour_j) - 1] - contour_j[j]
                     vj = contour_j[j + 1 if j < len(contour_j) - 1 else 0] - contour_j[j]
 
@@ -118,60 +86,17 @@ def extract_static_edges(contours, obstacle_mask):
                     if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
                         continue
 
-                    if False:  # Use bitmap intersection check
-                        cv2.line(line_img, contour_i[i], contour_j[j], color=[1])
-                        if np.any(line_img & obstacle_mask):
-                            line_img = np.zeros(obstacle_mask.shape, dtype=np.uint8)
-                            continue
-                    else:
-
-                        # The following handles this special case, where the intersection would otherwise not be caught:
-                        #            ______
-                        #           /######\
-                        #    j_____/########\_____i
-                        #   /######################\
-                        #  /########################\
-                        #
-                        # Note that this can only happen between vertices of the same contour due to the checks we do
-                        # before
-                        if ci == cj:
-                            if ndui == 0 and np.dot(t, ui) > 0:
-                                pim0 = contour_i[i]
-                                pim1 = contour_i[i - 1 if i > 0 else len(contour_i) - 1]
-                                pim2 = contour_i[i - 2 if i > 1 else len(contour_i) - 1]
-                                if np.cross(pim2 - pim1, pim0 - pim1) < 0:
-                                    continue
-                            if ndvi == 0 and np.dot(t, vi) > 0:
-                                pip0 = contour_i[i]
-                                pip1 = contour_i[i + 1 if i < len(contour_i) - 1 else 0]
-                                pip2 = contour_i[i + 2 if i < len(contour_i) - 2 else 0]
-                                if np.cross(pip0 - pip1, pip2 - pip1) < 0:
-                                    continue
-                            if nduj == 0 and np.dot(t, uj) < 0:
-                                pjm0 = contour_j[j]
-                                pjm1 = contour_j[j - 1 if j > 0 else len(contour_j) - 1]
-                                pjm2 = contour_j[j - 2 if j > 1 else len(contour_j) - 1]
-                                if np.cross(pjm2 - pjm1, pjm0 - pjm1) < 0:
-                                    continue
-                            if ndvj == 0 and np.dot(t, vj) < 0:
-                                pjp0 = contour_j[j]
-                                pjp1 = contour_j[j + 1 if j < len(contour_j) - 1 else 0]
-                                pjp2 = contour_j[j + 2 if j < len(contour_j) - 2 else 0]
-                                if np.cross(pjp0 - pjp1, pjp2 - pjp1) < 0:
-                                    continue
-
-                        # Discard edges that intersect contours
-                        if intersect_contours(contour_i[i], contour_j[j], contours):
-                            continue
+                    # Discard edges that intersect contours
+                    if intersect_contours(contour_i[i], contour_j[j], contours):
+                        continue
 
                     edges.append([contour_i[i].tolist(), contour_j[j].tolist()])
 
     return edges
 
 
-def extract_dynamic_edges(contours, obstacle_mask, point):
+def extract_dynamic_edges(contours, point):
     # FIXME: We should try to avoid duplication anyway.
-    line_img = np.zeros(obstacle_mask.shape, dtype=np.uint8)
     edges = []
     for cj in range(len(contours)):
         contour_j = np.squeeze(contours[cj])
@@ -190,9 +115,7 @@ def extract_dynamic_edges(contours, obstacle_mask, point):
             if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
                 continue
 
-            cv2.line(line_img, point, contour_j[j], color=[1])
-            if np.any(line_img & obstacle_mask):
-                line_img = np.zeros(obstacle_mask.shape, dtype=np.uint8)
+            if intersect_contours(point, contour_j[j], contours):
                 continue
 
             edges.append([point.tolist(), contour_j[j].tolist()])
@@ -264,18 +187,10 @@ def main():
     img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
     cv2.drawContours(img, contours, contourIdx=-1, color=(192, 64, 64))
 
-    obstacle_mask = np.zeros(original_img.shape[0:2], dtype=np.uint8)
-    cv2.drawContours(obstacle_mask, contours, contourIdx=-1, color=[1])
-    mask = np.zeros((obstacle_mask.shape[0] + 2, obstacle_mask.shape[1] + 2), dtype=np.uint8)
-    _, obstacle_mask, _, _ = cv2.floodFill(obstacle_mask, mask=mask, seedPoint=start_point, newVal=[1])
-    assert np.min(obstacle_mask) == 0
-    assert np.max(obstacle_mask) == 1
-    obstacle_mask = 1 - obstacle_mask
-
-    edges = extract_static_edges(contours, obstacle_mask)
+    edges = extract_static_edges(contours)
     print(f'Number of static edges: {len(edges)}')
-    start_edges = extract_dynamic_edges(contours, obstacle_mask, np.array(start_point))
-    target_edges = extract_dynamic_edges(contours, obstacle_mask, np.array(target_point))
+    start_edges = extract_dynamic_edges(contours, np.array(start_point))
+    target_edges = extract_dynamic_edges(contours, np.array(target_point))
     print(f'Number of dynamic edges: {len(start_edges) + len(target_edges)}')
 
     for edge in edges:
