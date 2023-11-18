@@ -55,7 +55,22 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
     return False
 
 
-def extract_static_edges(contours):
+def extract_convex_vertices(contours):
+    vertices = []
+    to_prev = []
+    to_next = []
+    for contour in contours:
+        for i in range(len(contour)):
+            to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
+            to_next_i = contour[i + 1 if i < len(contour) - 1 else 0] - contour[i]
+            if np.cross(to_prev_i, to_next_i) >= 0:
+                vertices.append(contour[i])
+                to_prev.append(to_prev_i)
+                to_next.append(to_prev_i)
+    return vertices, to_prev, to_next
+
+
+def extract_static_edges_old(contours):
     edges = []
     for ic in range(len(contours)):
         for iv in range(len(contours[ic])):
@@ -65,12 +80,12 @@ def extract_static_edges(contours):
             if np.cross(to_prev_i, to_next_i) < 0:
                 continue
 
-            edges += extract_edges(contours, ic, iv, to_prev_i, to_next_i)
+            edges += extract_edges_old(contours, ic, iv, to_prev_i, to_next_i)
 
     return edges
 
 
-def extract_edges(contours, ic, iv, to_prev_i, to_next_i):
+def extract_edges_old(contours, ic, iv, to_prev_i, to_next_i):
     # IMPORTANT NOTE: the image space uses a left-hand basis because the y-axis is positive towards
     # the bottom.
 
@@ -135,7 +150,7 @@ def extract_edges(contours, ic, iv, to_prev_i, to_next_i):
     return edges
 
 
-def extract_dynamic_edges(contours, point):
+def extract_dynamic_edges_old(contours, point):
     edges = []
     for jc in range(0, len(contours)):
         for jv in range(0, len(contours[jc])):
@@ -226,10 +241,16 @@ def main():
     img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
     cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
 
-    edges = extract_static_edges(contours)
+    vertices, to_prev, to_next = extract_convex_vertices(contours)
+    print(f'{len(vertices) = }')
+    print(f'{len(to_prev) = }')
+    print(f'{len(to_next) = }')
+    exit()
+
+    edges = extract_static_edges_old(contours)
     print(f'Number of static edges: {len(edges)}')
-    source_edges = extract_dynamic_edges(contours, np.array(source_point))
-    target_edges = extract_dynamic_edges(contours, np.array(target_point))
+    source_edges = extract_dynamic_edges_old(contours, np.array(source_point))
+    target_edges = extract_dynamic_edges_old(contours, np.array(target_point))
     print(f'Number of dynamic edges: {len(source_edges) + len(target_edges)}')
 
     for ci, i, cj, j in edges:
