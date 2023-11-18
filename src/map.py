@@ -15,30 +15,42 @@ def normalize(img: np.ndarray):
         return (img.astype(np.float32) - img.min()) / range_values
 
 
-def intersect_segments(a1: np.ndarray, a2: np.ndarray, b1: np.ndarray, b2: np.ndarray) -> bool:
+def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> bool:
     """
-    Checks for an intersection between the half-open segment ]a1---a2] and closed segment [b1---b2].
-    b1 and b2 can be Nx2 arrays, in which case the function returns True if any intersection is detected.
+    Checks for an intersection between the half-open segment ]a---b] and closed segments [c[i]---d[i]]
     """
-    delta_a = a2 - a1
-    delta_b = b2 - b1
-    c_b1a2_b1b2 = np.cross(a2 - b1, delta_b)
-    c_b1a1_b1b2 = np.cross(a1 - b1, delta_b)
-    c_a1b2_a1a2 = np.cross(b2 - a1, delta_a)
-    c_a1b1_a1a2 = np.cross(b1 - a1, delta_a)
-    return np.any(
-        (((c_b1a2_b1b2 >= 0) & (c_b1a1_b1b2 < 0)) | ((c_b1a2_b1b2 <= 0) & (c_b1a1_b1b2 > 0))) & (
-                ((c_a1b2_a1a2 > 0) & (c_a1b1_a1a2 < 0)) | ((c_a1b2_a1a2 < 0) & (c_a1b1_a1a2 > 0))))
+
+    ab = b - a
+    cd = d - c
+    ac = c - a
+    cb_cd = np.cross(b - c, cd)
+    ca_cd = np.cross(a - c, cd)
+    ad_ab = np.cross(d - a, ab)
+    ac_ab = np.cross(ac, ab)
+
+    # Detects intersections between non-colinear segments
+    if np.any(
+            (((cb_cd >= 0) & (ca_cd < 0)) | ((cb_cd <= 0) & (ca_cd > 0))) & (
+                    ((ad_ab > 0) & (ac_ab < 0)) | ((ad_ab < 0) & (ac_ab > 0)))):
+        return True
+
+    colinear_mask = (cb_cd == 0) & (ca_cd == 0) & (ad_ab == 0) & (ac_ab == 0)
+    ac_dot_ab = ac[:, 0] * ab[0] + ac[:, 1] * ab[1]
+    ab_dot_cd = ab[0] * cd[:, 0] + ab[1] * cd[:, 1]
+    ab_dot_ab = ab[0] * ab[0] + ab[1] * ab[1]
+    mask_dir_same = (ab_dot_cd > 0) & (ac_dot_ab + ab_dot_cd > 0) & (ac_dot_ab - ab_dot_ab <= 0)
+    mask_dir_opposite = (ab_dot_cd < 0) & (ac_dot_ab > 0) & (ac_dot_ab + ab_dot_cd - ab_dot_ab <= 0)
+    return np.any(colinear_mask & (mask_dir_same | mask_dir_opposite))
 
 
-def intersect_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> bool:
+def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> bool:
     """
-    Checks for an intersection between the half-open segment ]pt1---pt2] and all contours.
+    Checks for an intersection between the half-open segment ]pt1---pt2] and all contours
     """
     for contour in contours:
-        if intersect_segments(pt1, pt2, contour[:-1, 0], contour[1:, 0]):
+        if segments_intersect(pt1, pt2, contour[:-1, 0], contour[1:, 0]):
             return True
-        if intersect_segments(pt1, pt2, contour[-1, 0], contour[0, 0]):
+        if segments_intersect(pt1, pt2, np.array([contour[-1, 0]]), np.array([contour[0, 0]])):
             return True
     return False
 
@@ -86,8 +98,11 @@ def extract_static_edges(contours):
                     if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
                         continue
 
+                    # NOTE: we are missing the case where we loop back around
+                    neighbor = (ci == cj and j == i + 1)
+
                     # Discard edges that intersect contours
-                    if intersect_contours(contour_i[i], contour_j[j], contours):
+                    if not neighbor and segment_intersects_contours(contour_i[i], contour_j[j], contours):
                         continue
 
                     edges.append([contour_i[i].tolist(), contour_j[j].tolist()])
@@ -115,7 +130,7 @@ def extract_dynamic_edges(contours, point):
             if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
                 continue
 
-            if intersect_contours(point, contour_j[j], contours):
+            if segment_intersects_contours(point, contour_j[j], contours):
                 continue
 
             edges.append([point.tolist(), contour_j[j].tolist()])
@@ -143,7 +158,7 @@ def main():
     kernel_size = 50
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    start_point = (200, 100)
+    source_point = (200, 100)
     target_point = (120, 730)
     original_img = cv2.imread('../map.png')
     img = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
@@ -157,9 +172,9 @@ def main():
     # a priori, and might not be suitable if the map has several disconnected
     # regions across which the robot might get kidnapped
     mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), dtype=np.uint8)
-    assert img[start_point[::-1]] == 0, 'Flood fill seed point is not in free space'
+    assert img[source_point[::-1]] == 0, 'Flood fill seed point is not in free space'
     _, img, _, _ = cv2.floodFill(img, mask=mask,
-                                 seedPoint=start_point, newVal=2)
+                                 seedPoint=source_point, newVal=2)
     _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY_INV)
 
     # NOTE: using RETR_EXTERNAL means we would only get the outer contours,
@@ -185,22 +200,23 @@ def main():
     walkable[:] = (192, 64, 64)
     cv2.drawContours(walkable, contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
     img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
-    cv2.drawContours(img, contours, contourIdx=-1, color=(192, 64, 64))
+    cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
 
     edges = extract_static_edges(contours)
     print(f'Number of static edges: {len(edges)}')
-    start_edges = extract_dynamic_edges(contours, np.array(start_point))
+    source_edges = extract_dynamic_edges(contours, np.array(source_point))
     target_edges = extract_dynamic_edges(contours, np.array(target_point))
-    print(f'Number of dynamic edges: {len(start_edges) + len(target_edges)}')
+    print(f'Number of dynamic edges: {len(source_edges) + len(target_edges)}')
 
     for edge in edges:
         cv2.line(img, edge[0], edge[1], color=(0, 0, 0))
-    for edge in start_edges:
+    for edge in source_edges:
         cv2.line(img, edge[0], edge[1], color=(64, 192, 64))
     for edge in target_edges:
         cv2.line(img, edge[0], edge[1], color=(64, 64, 192))
-    cv2.circle(img, start_point, color=(64, 192, 64), radius=6, thickness=-1)
+    cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
     cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
+    # draw_contour_orientations(img, contours, orientations)
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', img.shape[1], img.shape[0])
     cv2.imshow('main', normalize(img))
