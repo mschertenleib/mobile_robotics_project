@@ -9,13 +9,12 @@ class Edge(object):
         self.length = length
 
 
-def dijkstra(graph: list[list[Edge]], source: int, target: int):
+def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int):
     """
-    graph: adjacency list
     source: the starting vertex of the search
     target: the target vertex of the search
     """
-    vertex_count = len(graph)
+    vertex_count = len(adjacency_list)
     assert vertex_count > 0
     assert 0 <= source < vertex_count
     assert 0 <= target < vertex_count
@@ -34,11 +33,12 @@ def dijkstra(graph: list[list[Edge]], source: int, target: int):
         visited[u] = True
         unvisited_count -= 1
 
-        for edge in [edge for edge in graph[u] if not visited[edge.vertex]]:
-            alt = dist[u] + edge.length
-            if alt < dist[edge.vertex]:
-                dist[edge.vertex] = alt
-                prev[edge.vertex] = u
+        for edge in adjacency_list[u]:
+            if not visited[edge.vertex]:
+                alt = dist[u] + edge.length
+                if alt < dist[edge.vertex]:
+                    dist[edge.vertex] = alt
+                    prev[edge.vertex] = u
 
     return reconstruct_path(prev, source, target)
 

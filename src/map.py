@@ -59,6 +59,7 @@ def extract_static_edges(contours):
     # FIXME: there are still some cases where an intersection is not detected
 
     edges = []
+    vertices = []
     for ci in range(len(contours)):
         contour_i = np.squeeze(contours[ci])
         for i in range(len(contour_i)):
@@ -99,15 +100,15 @@ def extract_static_edges(contours):
                         continue
 
                     # NOTE: we are missing the case where we loop back around
-                    neighbor = (ci == cj and j == i + 1)
+                    is_neighbor = (ci == cj and (j == i + 1 or (i == 0 and j == len(contour_j) - 1)))
 
                     # Discard edges that intersect contours
-                    if not neighbor and segment_intersects_contours(contour_i[i], contour_j[j], contours):
+                    if not is_neighbor and segment_intersects_contours(contour_i[i], contour_j[j], contours):
                         continue
 
                     edges.append([contour_i[i].tolist(), contour_j[j].tolist()])
 
-    return edges
+    return edges, vertices
 
 
 def extract_dynamic_edges(contours, point):
@@ -202,7 +203,8 @@ def main():
     img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
     cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
 
-    edges = extract_static_edges(contours)
+    edges, vertices = extract_static_edges(contours)
+    print(f'Number of vertices: {len(vertices)}')
     print(f'Number of static edges: {len(edges)}')
     source_edges = extract_dynamic_edges(contours, np.array(source_point))
     target_edges = extract_dynamic_edges(contours, np.array(target_point))
