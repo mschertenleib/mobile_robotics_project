@@ -48,28 +48,26 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
     Checks for an intersection between the half-open segment ]pt1---pt2] and all contours
     """
     for contour in contours:
-        if segments_intersect(pt1, pt2, contour[:-1, 0], contour[1:, 0]):
+        if segments_intersect(pt1, pt2, contour[:-1], contour[1:]):
             return True
-        if segments_intersect(pt1, pt2, np.array([contour[-1, 0]]), np.array([contour[0, 0]])):
+        if segments_intersect(pt1, pt2, np.array([contour[-1]]), np.array([contour[0]])):
             return True
     return False
 
 
 def extract_static_edges(contours):
-    # FIXME: there are still some cases where an intersection is not detected
-
     edges = []
-    vertices = []
     for ci in range(len(contours)):
-        contour_i = np.squeeze(contours[ci])
+        contour_i = contours[ci]
         for i in range(len(contour_i)):
             ui = contour_i[i - 1 if i > 0 else len(contour_i) - 1] - contour_i[i]
             vi = contour_i[i + 1 if i < len(contour_i) - 1 else 0] - contour_i[i]
+
             # Filter out concave vertices
             if np.cross(ui, vi) < 0:
                 continue
             for cj in range(ci, len(contours)):
-                contour_j = np.squeeze(contours[cj])
+                contour_j = contours[cj]
                 j0 = i + 1 if ci == cj else 0
                 for j in range(j0, len(contour_j)):
                     # TODO: we might be able to reduce the amount of work
@@ -99,16 +97,15 @@ def extract_static_edges(contours):
                     if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
                         continue
 
-                    # NOTE: we are missing the case where we loop back around
                     is_neighbor = (ci == cj and (j == i + 1 or (i == 0 and j == len(contour_j) - 1)))
 
                     # Discard edges that intersect contours
                     if not is_neighbor and segment_intersects_contours(contour_i[i], contour_j[j], contours):
                         continue
 
-                    edges.append([contour_i[i].tolist(), contour_j[j].tolist()])
+                    edges.append([ci, i, cj, j])
 
-    return edges, vertices
+    return edges
 
 
 def extract_dynamic_edges(contours, point):
@@ -185,7 +182,7 @@ def main():
     # which is actually very likely
     contours, hierarchy = cv2.findContours(img, mode=cv2.RETR_LIST,
                                            method=cv2.CHAIN_APPROX_SIMPLE)
-    contours = [cv2.approxPolyDP(contour, epsilon=approx_poly_epsilon, closed=True) for contour in contours]
+    contours = [np.squeeze(cv2.approxPolyDP(contour, epsilon=approx_poly_epsilon, closed=True)) for contour in contours]
 
     # NOTE: orientation is positive for a clockwise contour, which is the opposite of the mathematical standard
     # (right-hand rule). Note however that the outer contour of a shape is always
@@ -203,15 +200,15 @@ def main():
     img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
     cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
 
-    edges, vertices = extract_static_edges(contours)
-    print(f'Number of vertices: {len(vertices)}')
+    edges = extract_static_edges(contours)
+    print(edges)
     print(f'Number of static edges: {len(edges)}')
     source_edges = extract_dynamic_edges(contours, np.array(source_point))
     target_edges = extract_dynamic_edges(contours, np.array(target_point))
     print(f'Number of dynamic edges: {len(source_edges) + len(target_edges)}')
 
-    for edge in edges:
-        cv2.line(img, edge[0], edge[1], color=(0, 0, 0))
+    for ci, i, cj, j in edges:
+        cv2.line(img, contours[ci][i], contours[cj][j], color=(0, 0, 0))
     for edge in source_edges:
         cv2.line(img, edge[0], edge[1], color=(64, 192, 64))
     for edge in target_edges:
