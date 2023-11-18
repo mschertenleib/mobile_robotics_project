@@ -57,81 +57,107 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
 
 def extract_static_edges(contours):
     edges = []
-    for ci in range(len(contours)):
-        contour_i = contours[ci]
-        for i in range(len(contour_i)):
-            ui = contour_i[i - 1 if i > 0 else len(contour_i) - 1] - contour_i[i]
-            vi = contour_i[i + 1 if i < len(contour_i) - 1 else 0] - contour_i[i]
-
+    for ic in range(len(contours)):
+        for iv in range(len(contours[ic])):
             # Filter out concave vertices
-            if np.cross(ui, vi) < 0:
+            to_prev_i = contours[ic][iv - 1 if iv > 0 else len(contours[ic]) - 1] - contours[ic][iv]
+            to_next_i = contours[ic][iv + 1 if iv < len(contours[ic]) - 1 else 0] - contours[ic][iv]
+            if np.cross(to_prev_i, to_next_i) < 0:
                 continue
-            for cj in range(ci, len(contours)):
-                contour_j = contours[cj]
-                j0 = i + 1 if ci == cj else 0
-                for j in range(j0, len(contour_j)):
-                    # TODO: we might be able to reduce the amount of work
-                    #  here by using some algebra, and leverage numpy's functions
 
-                    uj = contour_j[j - 1 if j > 0 else len(contour_j) - 1] - contour_j[j]
-                    vj = contour_j[j + 1 if j < len(contour_j) - 1 else 0] - contour_j[j]
+            edges += extract_edges(contours, ic, iv, to_prev_i, to_next_i)
 
-                    # IMPORTANT NOTE: the image space uses a left-hand basis because the y-axis is positive towards
-                    # the bottom.
+    return edges
 
-                    # Filter out concave vertices
-                    if np.cross(uj, vj) < 0:
-                        continue
 
-                    t = contour_j[j] - contour_i[i]
-                    n = (-t[1], t[0])
-                    ndui = np.dot(n, ui)  # = np.cross(t, ui)
-                    ndvi = np.dot(n, vi)  # = np.cross(t, vi)
-                    nduj = np.dot(n, uj)  # = np.cross(t, uj)
-                    ndvj = np.dot(n, vj)  # = np.cross(t, vj)
+def extract_edges(contours, ic, iv, to_prev_i, to_next_i):
+    # IMPORTANT NOTE: the image space uses a left-hand basis because the y-axis is positive towards
+    # the bottom.
 
-                    # Only keep vertices for which the previous and next one both lie on the same
-                    # side of the line, or on the line itself.
-                    if (ndui < 0 or ndvi < 0) and (ndui > 0 or ndvi > 0):
-                        continue
-                    if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
-                        continue
+    edges = []
 
-                    is_neighbor = (ci == cj and (j == i + 1 or (i == 0 and j == len(contour_j) - 1)))
+    jc = ic
+    for jv in range(iv + 1, len(contours[jc])):
+        # Discard concave vertices
+        to_prev_j = contours[jc][jv - 1 if jv > 0 else len(contours[jc]) - 1] - contours[jc][jv]
+        to_next_j = contours[jc][jv + 1 if jv < len(contours[jc]) - 1 else 0] - contours[jc][jv]
+        # FIXME: we are checking for convexity over and over again for the same vertex. It is probably much better to
+        #  precompute the to_prev and to_next for each vertex, then pass that to a function that does the core loop
+        #  and checks. It would also probably make the whole system clearer and more modular
+        if np.cross(to_prev_j, to_next_j) < 0:
+            continue
 
-                    # Discard edges that intersect contours
-                    if not is_neighbor and segment_intersects_contours(contour_i[i], contour_j[j], contours):
-                        continue
+        # Only keep vertices for which the previous and next one both lie on the same
+        # side of the line, or on the line itself.
+        t = contours[jc][jv] - contours[ic][iv]
+        sin_prev_i = np.cross(t, to_prev_i)
+        sin_next_i = np.cross(t, to_next_i)
+        if (sin_prev_i < 0 or sin_next_i < 0) and (sin_prev_i > 0 or sin_next_i > 0):
+            continue
+        sin_prev_j = np.cross(t, to_prev_j)
+        sin_next_j = np.cross(t, to_next_j)
+        if (sin_prev_j < 0 or sin_next_j < 0) and (sin_prev_j > 0 or sin_next_j > 0):
+            continue
 
-                    edges.append([ci, i, cj, j])
+        # Discard edges that intersect contours
+        is_neighbor = (jv == iv + 1 or (iv == 0 and jv == len(contours[jc]) - 1))
+        if not is_neighbor and segment_intersects_contours(contours[ic][iv], contours[jc][jv], contours):
+            continue
+
+        edges.append([ic, iv, jc, jv])
+
+    for jc in range(ic + 1, len(contours)):
+        for jv in range(0, len(contours[jc])):
+            # Discard concave vertices
+            to_prev_j = contours[jc][jv - 1 if jv > 0 else len(contours[jc]) - 1] - contours[jc][jv]
+            to_next_j = contours[jc][jv + 1 if jv < len(contours[jc]) - 1 else 0] - contours[jc][jv]
+            if np.cross(to_prev_j, to_next_j) < 0:
+                continue
+
+            # Only keep vertices for which the previous and next one both lie on the same
+            # side of the line, or on the line itself.
+            t = contours[jc][jv] - contours[ic][iv]
+            sin_prev_i = np.cross(t, to_prev_i)
+            sin_next_i = np.cross(t, to_next_i)
+            if (sin_prev_i < 0 or sin_next_i < 0) and (sin_prev_i > 0 or sin_next_i > 0):
+                continue
+            sin_prev_j = np.cross(t, to_prev_j)
+            sin_next_j = np.cross(t, to_next_j)
+            if (sin_prev_j < 0 or sin_next_j < 0) and (sin_prev_j > 0 or sin_next_j > 0):
+                continue
+
+            # Discard edges that intersect contours
+            if segment_intersects_contours(contours[ic][iv], contours[jc][jv], contours):
+                continue
+
+            edges.append([ic, iv, jc, jv])
 
     return edges
 
 
 def extract_dynamic_edges(contours, point):
-    # FIXME: We should try to avoid duplication anyway.
     edges = []
-    for cj in range(len(contours)):
-        contour_j = np.squeeze(contours[cj])
-        for j in range(len(contour_j)):
-            uj = contour_j[j - 1 if j > 0 else len(contour_j) - 1] - contour_j[j]
-            vj = contour_j[j + 1 if j < len(contour_j) - 1 else 0] - contour_j[j]
-
-            if np.cross(uj, vj) < 0:
+    for jc in range(0, len(contours)):
+        for jv in range(0, len(contours[jc])):
+            # Discard concave vertices
+            to_prev_j = contours[jc][jv - 1 if jv > 0 else len(contours[jc]) - 1] - contours[jc][jv]
+            to_next_j = contours[jc][jv + 1 if jv < len(contours[jc]) - 1 else 0] - contours[jc][jv]
+            if np.cross(to_prev_j, to_next_j) < 0:
                 continue
 
-            t = contour_j[j] - point
-            n = (-t[1], t[0])
-            nduj = np.dot(n, uj)
-            ndvj = np.dot(n, vj)
-
-            if (nduj < 0 or ndvj < 0) and (nduj > 0 or ndvj > 0):
+            # Only keep vertices for which the previous and next one both lie on the same
+            # side of the line, or on the line itself.
+            t = contours[jc][jv] - point
+            sin_prev_j = np.cross(t, to_prev_j)
+            sin_next_j = np.cross(t, to_next_j)
+            if (sin_prev_j < 0 or sin_next_j < 0) and (sin_prev_j > 0 or sin_next_j > 0):
                 continue
 
-            if segment_intersects_contours(point, contour_j[j], contours):
+            # Discard edges that intersect contours
+            if segment_intersects_contours(point, contours[jc][jv], contours):
                 continue
 
-            edges.append([point.tolist(), contour_j[j].tolist()])
+            edges.append([point, contours[jc][jv].tolist()])
 
     return edges
 
@@ -201,7 +227,6 @@ def main():
     cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
 
     edges = extract_static_edges(contours)
-    print(edges)
     print(f'Number of static edges: {len(edges)}')
     source_edges = extract_dynamic_edges(contours, np.array(source_point))
     target_edges = extract_dynamic_edges(contours, np.array(target_point))
