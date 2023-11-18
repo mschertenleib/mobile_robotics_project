@@ -66,113 +66,53 @@ def extract_convex_vertices(contours):
             if np.cross(to_prev_i, to_next_i) >= 0:
                 vertices.append(contour[i])
                 to_prev.append(to_prev_i)
-                to_next.append(to_prev_i)
+                to_next.append(to_next_i)
     return vertices, to_prev, to_next
 
 
-def extract_static_edges_old(contours):
+def extract_static_edges(contours, vertices, to_prev, to_next):
     edges = []
-    for ic in range(len(contours)):
-        for iv in range(len(contours[ic])):
-            # Filter out concave vertices
-            to_prev_i = contours[ic][iv - 1 if iv > 0 else len(contours[ic]) - 1] - contours[ic][iv]
-            to_next_i = contours[ic][iv + 1 if iv < len(contours[ic]) - 1 else 0] - contours[ic][iv]
-            if np.cross(to_prev_i, to_next_i) < 0:
-                continue
+    for i in range(len(vertices)):
+        for j in range(i + 1, len(vertices)):
 
-            edges += extract_edges_old(contours, ic, iv, to_prev_i, to_next_i)
-
-    return edges
-
-
-def extract_edges_old(contours, ic, iv, to_prev_i, to_next_i):
-    # IMPORTANT NOTE: the image space uses a left-hand basis because the y-axis is positive towards
-    # the bottom.
-
-    edges = []
-
-    jc = ic
-    for jv in range(iv + 1, len(contours[jc])):
-        # Discard concave vertices
-        to_prev_j = contours[jc][jv - 1 if jv > 0 else len(contours[jc]) - 1] - contours[jc][jv]
-        to_next_j = contours[jc][jv + 1 if jv < len(contours[jc]) - 1 else 0] - contours[jc][jv]
-        # FIXME: we are checking for convexity over and over again for the same vertex. It is probably much better to
-        #  precompute the to_prev and to_next for each vertex, then pass that to a function that does the core loop
-        #  and checks. It would also probably make the whole system clearer and more modular
-        if np.cross(to_prev_j, to_next_j) < 0:
-            continue
-
-        # Only keep vertices for which the previous and next one both lie on the same
-        # side of the line, or on the line itself.
-        t = contours[jc][jv] - contours[ic][iv]
-        sin_prev_i = np.cross(t, to_prev_i)
-        sin_next_i = np.cross(t, to_next_i)
-        if (sin_prev_i < 0 or sin_next_i < 0) and (sin_prev_i > 0 or sin_next_i > 0):
-            continue
-        sin_prev_j = np.cross(t, to_prev_j)
-        sin_next_j = np.cross(t, to_next_j)
-        if (sin_prev_j < 0 or sin_next_j < 0) and (sin_prev_j > 0 or sin_next_j > 0):
-            continue
-
-        # Discard edges that intersect contours
-        is_neighbor = (jv == iv + 1 or (iv == 0 and jv == len(contours[jc]) - 1))
-        if not is_neighbor and segment_intersects_contours(contours[ic][iv], contours[jc][jv], contours):
-            continue
-
-        edges.append([ic, iv, jc, jv])
-
-    for jc in range(ic + 1, len(contours)):
-        for jv in range(0, len(contours[jc])):
-            # Discard concave vertices
-            to_prev_j = contours[jc][jv - 1 if jv > 0 else len(contours[jc]) - 1] - contours[jc][jv]
-            to_next_j = contours[jc][jv + 1 if jv < len(contours[jc]) - 1 else 0] - contours[jc][jv]
-            if np.cross(to_prev_j, to_next_j) < 0:
-                continue
-
-            # Only keep vertices for which the previous and next one both lie on the same
-            # side of the line, or on the line itself.
-            t = contours[jc][jv] - contours[ic][iv]
-            sin_prev_i = np.cross(t, to_prev_i)
-            sin_next_i = np.cross(t, to_next_i)
+            # Discard vertices for which the previous and next one lie on opposite sides of the edge
+            edge = vertices[j] - vertices[i]
+            sin_prev_i = np.cross(edge, to_prev[i])
+            sin_next_i = np.cross(edge, to_next[i])
             if (sin_prev_i < 0 or sin_next_i < 0) and (sin_prev_i > 0 or sin_next_i > 0):
                 continue
-            sin_prev_j = np.cross(t, to_prev_j)
-            sin_next_j = np.cross(t, to_next_j)
+            sin_prev_j = np.cross(edge, to_prev[j])
+            sin_next_j = np.cross(edge, to_next[j])
             if (sin_prev_j < 0 or sin_next_j < 0) and (sin_prev_j > 0 or sin_next_j > 0):
                 continue
 
-            # Discard edges that intersect contours
-            if segment_intersects_contours(contours[ic][iv], contours[jc][jv], contours):
+            # Discard edges that intersect contours, but not for edges between connected vertices
+            is_j_prev_i = np.all(to_prev[i] == edge)
+            is_j_next_i = np.all(to_next[i] == edge)
+            is_i_prev_j = np.all(to_prev[j] == -edge)
+            is_i_next_j = np.all(to_next[j] == -edge)
+            are_ij_connected = (is_j_prev_i or is_j_next_i) and (is_i_prev_j or is_i_next_j)
+            if not are_ij_connected and segment_intersects_contours(vertices[i], vertices[j], contours):
                 continue
 
-            edges.append([ic, iv, jc, jv])
+            edges.append([i, j])
 
     return edges
 
 
-def extract_dynamic_edges_old(contours, point):
+def extract_dynamic_connected_vertices(contours, vertices, to_prev, to_next, point):
     edges = []
-    for jc in range(0, len(contours)):
-        for jv in range(0, len(contours[jc])):
-            # Discard concave vertices
-            to_prev_j = contours[jc][jv - 1 if jv > 0 else len(contours[jc]) - 1] - contours[jc][jv]
-            to_next_j = contours[jc][jv + 1 if jv < len(contours[jc]) - 1 else 0] - contours[jc][jv]
-            if np.cross(to_prev_j, to_next_j) < 0:
-                continue
+    for i in range(len(vertices)):
+        edge = vertices[i] - point
+        sin_prev_i = np.cross(edge, to_prev[i])
+        sin_next_i = np.cross(edge, to_next[i])
+        if (sin_prev_i < 0 or sin_next_i < 0) and (sin_prev_i > 0 or sin_next_i > 0):
+            continue
 
-            # Only keep vertices for which the previous and next one both lie on the same
-            # side of the line, or on the line itself.
-            t = contours[jc][jv] - point
-            sin_prev_j = np.cross(t, to_prev_j)
-            sin_next_j = np.cross(t, to_next_j)
-            if (sin_prev_j < 0 or sin_next_j < 0) and (sin_prev_j > 0 or sin_next_j > 0):
-                continue
+        if segment_intersects_contours(point, vertices[i], contours):
+            continue
 
-            # Discard edges that intersect contours
-            if segment_intersects_contours(point, contours[jc][jv], contours):
-                continue
-
-            edges.append([point, contours[jc][jv].tolist()])
+        edges.append(i)
 
     return edges
 
@@ -242,23 +182,21 @@ def main():
     cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
 
     vertices, to_prev, to_next = extract_convex_vertices(contours)
-    print(f'{len(vertices) = }')
-    print(f'{len(to_prev) = }')
-    print(f'{len(to_next) = }')
-    exit()
-
-    edges = extract_static_edges_old(contours)
+    print(f'Number of convex vertices: {len(vertices)}')
+    edges = extract_static_edges(contours, vertices, to_prev, to_next)
     print(f'Number of static edges: {len(edges)}')
-    source_edges = extract_dynamic_edges_old(contours, np.array(source_point))
-    target_edges = extract_dynamic_edges_old(contours, np.array(target_point))
-    print(f'Number of dynamic edges: {len(source_edges) + len(target_edges)}')
+    source_connections = extract_dynamic_connected_vertices(contours, vertices, to_prev, to_next,
+                                                            np.array(source_point))
+    target_connections = extract_dynamic_connected_vertices(contours, vertices, to_prev, to_next,
+                                                            np.array(target_point))
+    print(f'Number of dynamic edges: {len(source_connections) + len(target_connections)}')
 
-    for ci, i, cj, j in edges:
-        cv2.line(img, contours[ci][i], contours[cj][j], color=(0, 0, 0))
-    for edge in source_edges:
-        cv2.line(img, edge[0], edge[1], color=(64, 192, 64))
-    for edge in target_edges:
-        cv2.line(img, edge[0], edge[1], color=(64, 64, 192))
+    for i, j in edges:
+        cv2.line(img, vertices[i], vertices[j], color=(0, 0, 0))
+    for i in source_connections:
+        cv2.line(img, source_point, vertices[i], color=(64, 192, 64))
+    for i in target_connections:
+        cv2.line(img, target_point, vertices[i], color=(64, 64, 192))
     cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
     cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
     # draw_contour_orientations(img, contours, orientations)
