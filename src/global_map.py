@@ -6,8 +6,19 @@ class Edge(object):
     __slots__ = ['vertex', 'length']
 
     def __init__(self, vertex, length):
-        self.vertex = vertex
-        self.length = length
+        self.vertex: int = vertex
+        self.length: float = length
+
+
+class Graph:
+    SOURCE = -1
+    TARGET = -2
+
+    def __init__(self):
+        self.vertices: list[int] = []
+        self.adjacency: list[list[Edge]] = []
+        self.to_prev: list[np.ndarray] = []
+        self.to_next: list[np.ndarray] = []
 
 
 def image_info(img: np.ndarray):
@@ -63,7 +74,7 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
     return False
 
 
-def extract_convex_vertices(contours):
+def _extract_convex_vertices(contours):
     vertices = []
     to_prev = []
     to_next = []
@@ -78,8 +89,8 @@ def extract_convex_vertices(contours):
     return vertices, to_prev, to_next
 
 
-def extract_static_edges(contours, vertices, to_prev, to_next):
-    edges = [[] for _ in range(len(vertices))]
+def _extract_static_adjacency(contours, vertices, to_prev, to_next):
+    adjacency = [[] for _ in range(len(vertices))]
     for i in range(len(vertices)):
         for j in range(i + 1, len(vertices)):
 
@@ -103,27 +114,78 @@ def extract_static_edges(contours, vertices, to_prev, to_next):
             if not are_ij_connected and segment_intersects_contours(vertices[i], vertices[j], contours):
                 continue
 
-            edges[i].append(j)
-            edges[j].append(i)
+            edge_length = np.linalg.norm(edge)
+            adjacency[i].append(Edge(vertex=j, length=edge_length))
+            adjacency[j].append(Edge(vertex=i, length=edge_length))
 
-    return edges
+    return adjacency
 
 
-def extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
+def _extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
+    # TODO: if the point is inside a contour, make it move out by adding a node on the contour and making it its only
+    #  connection, but that implies the number of edges might increase by one sometimes
     edges = []
     for i in range(len(vertices)):
+
+        # Discard vertices for which the previous and next one lie on opposite sides of the edge
         edge = vertices[i] - point
         sin_prev_i = np.cross(edge, to_prev[i])
         sin_next_i = np.cross(edge, to_next[i])
         if (sin_prev_i < 0 or sin_next_i < 0) and (sin_prev_i > 0 or sin_next_i > 0):
             continue
 
+        # Discard edges that intersect contours
         if segment_intersects_contours(point, vertices[i], contours):
             continue
 
-        edges.append(i)
+        edge_length = np.linalg.norm(edge)
+        edges.append(Edge(vertex=i, length=edge_length))
 
     return edges
+
+
+def build_graph(contours):
+    vertices, to_prev, to_next = _extract_convex_vertices(contours)
+    adjacency = _extract_static_adjacency(contours, vertices, to_prev, to_next)
+    # Reserve source and target vertices
+    vertices += [[], []]
+    adjacency += [[], []]
+    graph = Graph()
+    graph.vertices = vertices
+    graph.adjacency = adjacency
+    graph.to_prev = to_prev
+    graph.to_next = to_next
+    return graph
+
+
+def update_graph(graph, contours, source, target):
+    # Remove old dynamic edges
+    # NOTE: this relies on dynamic edges being the last ones in the neighbor lists
+    for edge in graph.adjacency[Graph.SOURCE]:
+        del graph.adjacency[edge.vertex][-1]
+    for edge in graph.adjacency[Graph.TARGET]:
+        del graph.adjacency[edge.vertex][-1]
+    graph.adjacency[Graph.SOURCE] = []
+    graph.adjacency[Graph.TARGET] = []
+
+    # Extract new dynamic edges
+    graph.adjacency[Graph.SOURCE] = _extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
+                                                           source)
+    graph.adjacency[Graph.TARGET] = _extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
+                                                           target)
+    for edge in graph.adjacency[Graph.SOURCE]:
+        graph.adjacency[edge.vertex].append(Edge(vertex=Graph.SOURCE, length=edge.length))
+    for edge in graph.adjacency[Graph.TARGET]:
+        graph.adjacency[edge.vertex].append(Edge(vertex=Graph.TARGET, length=edge.length))
+
+    # Add the direct edge from source to target
+    if not segment_intersects_contours(source, target, contours):
+        edge_length = np.linalg.norm(target - source)
+        graph.adjacency[Graph.SOURCE].append(Edge(vertex=Graph.TARGET, length=edge_length))
+        graph.adjacency[Graph.TARGET].append(Edge(vertex=Graph.SOURCE, length=edge_length))
+
+    graph.vertices[Graph.SOURCE] = source
+    graph.vertices[Graph.TARGET] = target
 
 
 def draw_contour_orientations(img, contours, orientations):
@@ -141,15 +203,18 @@ def draw_contour_orientations(img, contours, orientations):
             cv2.circle(img, contours[c][i][0], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
-def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int):
+def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int) -> list[int]:
     """
     source: the starting vertex of the search
     target: the target vertex of the search
     """
     vertex_count = len(adjacency_list)
     assert vertex_count > 0
-    assert 0 <= source < vertex_count
-    assert 0 <= target < vertex_count
+
+    if target < 0:
+        target = len(adjacency_list) + target
+    if source < 0:
+        source = len(adjacency_list) + source
 
     dist = np.full(vertex_count, np.inf, dtype=float)
     prev = np.full(vertex_count, -1, dtype=int)
@@ -180,7 +245,7 @@ def reconstruct_path(prev, source: int, target: int) -> list[int]:
         return [target]
 
     if prev[target] < 0:
-        print('Target is not reachable from source')
+        # print('Target is not reachable from source')
         return []
 
     path = []
@@ -192,13 +257,16 @@ def reconstruct_path(prev, source: int, target: int) -> list[int]:
     return path
 
 
+mouse_x, mouse_y = 0, 0
+target_point = (120, 730)
+
+
 def main():
     threshold = 200
     kernel_size = 50
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
     source_point = (200, 100)
-    target_point = (120, 730)
     original_img = cv2.imread('../map.png')
     img = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
@@ -238,45 +306,52 @@ def main():
     walkable = np.zeros(original_img.shape, dtype=np.uint8)
     walkable[:] = (192, 64, 64)
     cv2.drawContours(walkable, contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
-    img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
-    cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
 
-    vertices, to_prev, to_next = extract_convex_vertices(contours)
-    print(f'Number of convex vertices: {len(vertices)}')
-    edges = extract_static_edges(contours, vertices, to_prev, to_next)
-    num_edges = sum([len([j for j in edges[i] if j > i]) for i in range(len(edges))])
-    print(f'Number of static edges: {num_edges}')
-    source_edges = extract_dynamic_edges(contours, vertices, to_prev, to_next,
-                                         np.array(source_point))
-    target_edges = extract_dynamic_edges(contours, vertices, to_prev, to_next,
-                                         np.array(target_point))
-    print(f'Number of dynamic edges: {len(source_edges) + len(target_edges)}')
+    graph = build_graph(contours)
 
-    for i in range(len(edges)):
-        for j in edges[i]:
-            if j > i:
-                cv2.line(img, vertices[i], vertices[j], color=(0, 0, 0))
-    for i in source_edges:
-        cv2.line(img, source_point, vertices[i], color=(64, 192, 64))
-    for i in target_edges:
-        cv2.line(img, target_point, vertices[i], color=(64, 64, 192))
-    cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
-    cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
-    # draw_contour_orientations(img, contours, orientations)
+    print(f'Number of static convex vertices: {len(graph.vertices) - 2}')
+    num_static_edges = sum(
+        [len([edge for edge in graph.adjacency[i] if edge.vertex > i]) for i in range(len(graph.adjacency))])
+    print(f'Number of static edges: {num_static_edges}')
+
+    update_graph(graph, contours, np.array(source_point), np.array(target_point))
+
+    num_edges_source = len(graph.adjacency[Graph.SOURCE])
+    print(f'Number of edges from source: {num_edges_source}')
+    num_edges_target = len(graph.adjacency[Graph.TARGET])
+    print(f'Number of edges to target: {num_edges_target}')
+
+    path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
+
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', img.shape[1], img.shape[0])
-    cv2.imshow('main', normalize(img))
-    cv2.waitKey(0)
+    cv2.setMouseCallback('main', on_click)
+    while True:
+        update_graph(graph, contours, np.array(source_point), np.array(target_point))
+        path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
+
+        img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
+        cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
+        for i in range(len(graph.adjacency)):
+            for edge in graph.adjacency[i]:
+                if edge.vertex > i or edge.vertex < 0:
+                    cv2.line(img, graph.vertices[i], graph.vertices[edge.vertex], color=(0, 0, 0))
+        for i in range(len(path) - 1):
+            cv2.line(img, graph.vertices[path[i]], graph.vertices[path[i + 1]], color=(64, 64, 192), thickness=3)
+        cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
+        cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
+        # draw_contour_orientations(img, contours, orientations)
+        cv2.imshow('main', normalize(img))
+        if cv2.waitKey(1) == 27:
+            break
     cv2.destroyAllWindows()
 
 
-mouse_x, mouse_y = 0, 0
-
-
 def on_click(event, x, y, flags, param):
-    global mouse_x, mouse_y
+    global mouse_x, mouse_y, target_point
     if event == cv2.EVENT_LBUTTONDOWN:
         mouse_x, mouse_y = x, y
+        target_point = (x, y)
 
 
 def floodfill_background():
@@ -294,7 +369,7 @@ def floodfill_background():
     seed_point = (mouse_x, mouse_y)
     _, img, mask, _ = cv2.floodFill(img, mask=np.array([], dtype=np.uint8), seedPoint=seed_point, newVal=0, loDiff=2,
                                     upDiff=2, flags=cv2.FLOODFILL_MASK_ONLY)
-    # TOOD: actually use the mask here
+    # TODO: actually use the mask here
     # _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY)
     image_info(mask)
     cv2.imshow('main', np.where(mask[1:-1, 1:-1], img, 0))
