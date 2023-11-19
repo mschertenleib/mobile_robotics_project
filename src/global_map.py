@@ -110,8 +110,8 @@ def _extract_static_adjacency(contours, vertices, to_prev, to_next):
             is_j_next_i = np.all(to_next[i] == edge)
             is_i_prev_j = np.all(to_prev[j] == -edge)
             is_i_next_j = np.all(to_next[j] == -edge)
-            are_ij_connected = (is_j_prev_i or is_j_next_i) and (is_i_prev_j or is_i_next_j)
-            if not are_ij_connected and segment_intersects_contours(vertices[i], vertices[j], contours):
+            are_pts_connected = (is_j_prev_i or is_j_next_i) and (is_i_prev_j or is_i_next_j)
+            if not are_pts_connected and segment_intersects_contours(vertices[i], vertices[j], contours):
                 continue
 
             edge_length = np.linalg.norm(edge)
@@ -122,8 +122,6 @@ def _extract_static_adjacency(contours, vertices, to_prev, to_next):
 
 
 def _extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
-    # TODO: if the point is inside a contour, make it move out by adding a node on the contour and making it its only
-    #  connection, but that implies the number of edges might increase by one sometimes
     edges = []
     for i in range(len(vertices)):
 
@@ -134,8 +132,11 @@ def _extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
         if (sin_prev_i < 0 or sin_next_i < 0) and (sin_prev_i > 0 or sin_next_i > 0):
             continue
 
-        # Discard edges that intersect contours
-        if segment_intersects_contours(point, vertices[i], contours):
+        # Discard edges that intersect contours, but not for edges between connected vertices
+        is_pt_prev_i = np.all(to_prev[i] == -edge)
+        is_pt_next_i = np.all(to_next[i] == -edge)
+        are_pts_connected = is_pt_prev_i or is_pt_next_i
+        if not are_pts_connected and segment_intersects_contours(point, vertices[i], contours):
             continue
 
         edge_length = np.linalg.norm(edge)
@@ -381,8 +382,8 @@ def main():
             cv2.line(img, graph.vertices[path[i]].astype(np.int32), graph.vertices[path[i + 1]].astype(np.int32),
                      color=(64, 64, 192), thickness=3)
         cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
-        cv2.circle(img, target_point.astype(int), color=(64, 64, 192), radius=6, thickness=-1)
-
+        cv2.line(img, raw_target, target_point.astype(np.int32), color=(0, 0, 0), thickness=3)
+        cv2.circle(img, target_point.astype(np.int32), color=(64, 64, 192), radius=6, thickness=-1)
         cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
 
         # draw_contour_orientations(img, contours, orientations)
