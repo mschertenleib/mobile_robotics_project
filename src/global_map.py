@@ -1,5 +1,4 @@
-import cv2
-import numpy as np
+from image_processing import *
 
 
 class Edge(object):
@@ -19,19 +18,6 @@ class Graph:
         self.adjacency: list[list[Edge]] = []
         self.to_prev: list[np.ndarray] = []
         self.to_next: list[np.ndarray] = []
-
-
-def image_info(img: np.ndarray):
-    print(
-        f'dtype: {img.dtype}, shape: {img.shape}, min: {img.min()}, max: {img.max()}')
-
-
-def normalize(img: np.ndarray):
-    range_values = img.max() - img.min()
-    if range_values == 0:
-        return img.astype(np.float32)
-    else:
-        return (img.astype(np.float32) - img.min()) / range_values
 
 
 def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> bool:
@@ -305,39 +291,25 @@ def push_out(pt: np.ndarray, contours, orientations, hierarchy) -> np.ndarray:
     return pt
 
 
-mouse_x, mouse_y = 0, 0
 raw_target = (120, 730)
 
 
 def main():
-    threshold = 200
-    kernel_size = 50
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
     source_point = np.array([200, 100])
-    original_img = cv2.imread('../map.png')
-    img = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
-    _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                       (kernel_size, kernel_size))
-    img = cv2.dilate(img, kernel)
-
-    # Flood fill from the robot location, so we only get the contours that
-    # are relevant. Note that this requires to know the position of the robot
-    # a priori, and might not be suitable if the map has several disconnected
-    # regions across which the robot might get kidnapped
-    mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), dtype=np.uint8)
-    assert np.all(img[source_point[1], source_point[0]] == 0), 'Flood fill seed point is not in free space'
-    _, img, _, _ = cv2.floodFill(img, mask=mask,
-                                 seedPoint=source_point, newVal=2)
-    _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY_INV)
+    color_image = cv2.imread('../map.png')
+    image_info(color_image)
+    # color_image = cv2.resize(color_image, dsize=(color_image.shape[1] // 4, color_image.shape[0] // 4))
+    # image_info(color_image)
+    obstacle_mask = get_obstacle_mask(color_image, source_point)
 
     # NOTE: using RETR_EXTERNAL means we would only get the outer contours,
     # which is basically equivalent to floodfilling the binary image from the
     # outside prior to calling findContours. However, this assumes our region
     # of interest is "outside", and would not work if we are "walled in",
     # which is actually very likely
-    contours, hierarchy = cv2.findContours(img, mode=cv2.RETR_TREE,
+    contours, hierarchy = cv2.findContours(obstacle_mask, mode=cv2.RETR_TREE,
                                            method=cv2.CHAIN_APPROX_SIMPLE)
     contours = [np.squeeze(cv2.approxPolyDP(contours[i], epsilon=approx_poly_epsilon, closed=True)) for i in
                 range(len(contours))]
@@ -352,7 +324,7 @@ def main():
     # robot is located, we can use them directly for computing the visibility
     # graph. Else, we must take into account the hierarchy.
 
-    walkable = np.zeros(original_img.shape, dtype=np.uint8)
+    walkable = np.zeros(color_image.shape, dtype=np.uint8)
     walkable[:] = (192, 64, 64)
     cv2.drawContours(walkable, contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
 
@@ -364,14 +336,14 @@ def main():
     print(f'Number of static edges: {num_static_edges}')
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('main', img.shape[1], img.shape[0])
+    cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
     cv2.setMouseCallback('main', mouse_callback)
     while True:
         target_point = push_out(np.array(raw_target), contours, orientations, hierarchy)
         update_graph(graph, contours, np.array(source_point), target_point)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
-        img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
+        img = cv2.addWeighted(color_image, 0.75, walkable, 0.25, 0.0)
         cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
         for i in range(len(graph.adjacency)):
             for edge in graph.adjacency[i]:
@@ -394,33 +366,9 @@ def main():
 
 
 def mouse_callback(event, x, y, flags, param):
-    global mouse_x, mouse_y, raw_target
+    global raw_target
     if event == cv2.EVENT_MOUSEMOVE:
-        mouse_x, mouse_y = x, y
         raw_target = (x, y)
-
-
-def floodfill_background():
-    img = cv2.imread('../map.png')
-    img = cv2.cv2tColor(img, cv2.COLOR_BGR2GRAY)
-
-    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('main', img.shape[1], img.shape[0])
-    cv2.setMouseCallback('main', mouse_callback)
-    cv2.imshow('main', normalize(img))
-    cv2.waitKey(0)
-
-    # Not sure this would actually work well...
-    global mouse_x, mouse_y
-    seed_point = (mouse_x, mouse_y)
-    _, img, mask, _ = cv2.floodFill(img, mask=np.array([], dtype=np.uint8), seedPoint=seed_point, newVal=0, loDiff=2,
-                                    upDiff=2, flags=cv2.FLOODFILL_MASK_ONLY)
-    # TODO: actually use the mask here
-    # _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY)
-    image_info(mask)
-    cv2.imshow('main', np.where(mask[1:-1, 1:-1], img, 0))
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
 
 
 def pathfinding_test():
@@ -439,7 +387,6 @@ def pathfinding_test():
 
 if __name__ == '__main__':
     main()
-    # floodfill_background()
     # pathfinding_test()
 
     """

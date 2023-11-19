@@ -1,7 +1,19 @@
+import cv2
+
 from robot import *
 
-import cv2
-import numpy as np
+
+def image_info(img: np.ndarray):
+    print(
+        f'dtype: {img.dtype}, shape: {img.shape}, min: {img.min()}, max: {img.max()}')
+
+
+def normalize(img: np.ndarray):
+    range_values = img.max() - img.min()
+    if range_values == 0:
+        return img.astype(np.float32)
+    else:
+        return (img.astype(np.float32) - img.min()) / range_values
 
 
 def transform(matrix, point):
@@ -56,13 +68,67 @@ def reconstruct_thymio():
     cv2.circle(img, center=center.astype(int), radius=5, color=(255, 255, 255), thickness=-1)
 
     dir = tip - center
-    draw_thymio(img, center, 0)  # TODO angle
+    draw_thymio(img, center, np.arctan2(-dir[0], dir[1]))
 
     cv2.imshow('main', img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 
+def get_obstacle_mask(color_image, source_point):
+    threshold = 200
+    kernel_size = 50
+    img = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+    _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                       (kernel_size, kernel_size))
+    img = cv2.dilate(img, kernel)
+
+    # Flood fill from the robot location, so we only get the contours that
+    # are relevant. Note that this requires to know the position of the robot
+    # a priori, and might not be suitable if the map has several disconnected
+    # regions across which the robot might get kidnapped
+    mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), dtype=np.uint8)
+    assert np.all(img[source_point[1], source_point[0]] == 0), 'Flood fill seed point is not in free space'
+    _, img, _, _ = cv2.floodFill(img, mask=mask, seedPoint=source_point, newVal=2)
+    _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY_INV)
+
+    return img
+
+
+mouse_x, mouse_y = 0, 0
+
+
+def mouse_callback(event, x, y, flags, param):
+    global mouse_x, mouse_y
+    if event == cv2.EVENT_MBUTTONDOWN:
+        mouse_x, mouse_y = x, y
+
+
+def floodfill_background():
+    img = cv2.imread('../map.png')
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('main', img.shape[1], img.shape[0])
+    cv2.setMouseCallback('main', mouse_callback)
+    cv2.imshow('main', normalize(img))
+    cv2.waitKey(0)
+
+    # Not sure this would actually work well...
+    global mouse_x, mouse_y
+    seed_point = (mouse_x, mouse_y)
+    _, img, mask, _ = cv2.floodFill(img, mask=np.array([], dtype=np.uint8), seedPoint=seed_point, newVal=0, loDiff=2,
+                                    upDiff=2, flags=cv2.FLOODFILL_MASK_ONLY)
+    # TODO: actually use the mask here
+    # _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY)
+    image_info(mask)
+    cv2.imshow('main', np.where(mask[1:-1, 1:-1], img, 0))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
 if __name__ == '__main__':
+    # floodfill_background()
     # correct_perspective()
     reconstruct_thymio()
