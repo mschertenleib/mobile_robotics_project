@@ -15,7 +15,7 @@ class Graph:
     TARGET = -2
 
     def __init__(self):
-        self.vertices: list[int] = []
+        self.vertices: list[np.ndarray] = []
         self.adjacency: list[list[Edge]] = []
         self.to_prev: list[np.ndarray] = []
         self.to_next: list[np.ndarray] = []
@@ -293,15 +293,19 @@ def project(pt, contour):
     return closest_point
 
 
-def push_out(pt, contours):
-    for contour in contours:
-        if cv2.pointPolygonTest(contour, pt, measureDist=False) > 0:
-            return project(pt, contour)
-    return np.array(pt)
+def push_out(pt: np.ndarray, contours, orientations, hierarchy) -> np.ndarray:
+    for i in range(len(contours)):
+        # FIXME(incomplete): we are skipping the top-level contour in the tree
+        if hierarchy[0][i][3] < 0:
+            continue
+        polygon_test = cv2.pointPolygonTest(contours[i], pt.astype(float), measureDist=False)
+        if (orientations[i] < 0 and polygon_test > 0) or (orientations[i] > 0 and polygon_test < 0):
+            return project(pt, contours[i])
+    return pt
 
 
 mouse_x, mouse_y = 0, 0
-target_point = (120, 730)
+raw_target = (120, 730)
 
 
 def main():
@@ -309,7 +313,7 @@ def main():
     kernel_size = 50
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    source_point = (200, 100)
+    source_point = np.array([200, 100])
     original_img = cv2.imread('../map.png')
     img = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
@@ -322,7 +326,7 @@ def main():
     # a priori, and might not be suitable if the map has several disconnected
     # regions across which the robot might get kidnapped
     mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), dtype=np.uint8)
-    assert img[source_point[::-1]] == 0, 'Flood fill seed point is not in free space'
+    assert np.all(img[source_point[1], source_point[0]] == 0), 'Flood fill seed point is not in free space'
     _, img, _, _ = cv2.floodFill(img, mask=mask,
                                  seedPoint=source_point, newVal=2)
     _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY_INV)
@@ -332,9 +336,10 @@ def main():
     # outside prior to calling findContours. However, this assumes our region
     # of interest is "outside", and would not work if we are "walled in",
     # which is actually very likely
-    contours, hierarchy = cv2.findContours(img, mode=cv2.RETR_LIST,
+    contours, hierarchy = cv2.findContours(img, mode=cv2.RETR_TREE,
                                            method=cv2.CHAIN_APPROX_SIMPLE)
-    contours = [np.squeeze(cv2.approxPolyDP(contour, epsilon=approx_poly_epsilon, closed=True)) for contour in contours]
+    contours = [np.squeeze(cv2.approxPolyDP(contours[i], epsilon=approx_poly_epsilon, closed=True)) for i in
+                range(len(contours))]
 
     # NOTE: orientation is positive for a clockwise contour, which is the opposite of the mathematical standard
     # (right-hand rule). Note however that the outer contour of a shape is always
@@ -357,18 +362,12 @@ def main():
         [len([edge for edge in graph.adjacency[i] if edge.vertex > i]) for i in range(len(graph.adjacency))])
     print(f'Number of static edges: {num_static_edges}')
 
-    update_graph(graph, contours, np.array(source_point), np.array(target_point))
-
-    num_edges_source = len(graph.adjacency[Graph.SOURCE])
-    print(f'Number of edges from source: {num_edges_source}')
-    num_edges_target = len(graph.adjacency[Graph.TARGET])
-    print(f'Number of edges to target: {num_edges_target}')
-
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', img.shape[1], img.shape[0])
     cv2.setMouseCallback('main', mouse_callback)
     while True:
-        update_graph(graph, contours, np.array(source_point), np.array(target_point))
+        target_point = push_out(np.array(raw_target), contours, orientations, hierarchy)
+        update_graph(graph, contours, np.array(source_point), target_point)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(original_img, 0.75, walkable, 0.25, 0.0)
@@ -376,14 +375,15 @@ def main():
         for i in range(len(graph.adjacency)):
             for edge in graph.adjacency[i]:
                 if edge.vertex > i or edge.vertex < 0:
-                    cv2.line(img, graph.vertices[i], graph.vertices[edge.vertex], color=(0, 0, 0))
+                    cv2.line(img, graph.vertices[i].astype(np.int32), graph.vertices[edge.vertex].astype(np.int32),
+                             color=(0, 0, 0))
         for i in range(len(path) - 1):
-            cv2.line(img, graph.vertices[path[i]], graph.vertices[path[i + 1]], color=(64, 64, 192), thickness=3)
+            cv2.line(img, graph.vertices[path[i]].astype(np.int32), graph.vertices[path[i + 1]].astype(np.int32),
+                     color=(64, 64, 192), thickness=3)
         cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
-        cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
+        cv2.circle(img, target_point.astype(int), color=(64, 64, 192), radius=6, thickness=-1)
 
-        proj = push_out(target_point, contours)
-        cv2.circle(img, proj.astype(int), color=(0, 0, 0), radius=6, thickness=-1)
+        cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
 
         # draw_contour_orientations(img, contours, orientations)
         cv2.imshow('main', normalize(img))
@@ -393,10 +393,10 @@ def main():
 
 
 def mouse_callback(event, x, y, flags, param):
-    global mouse_x, mouse_y, target_point
+    global mouse_x, mouse_y, raw_target
     if event == cv2.EVENT_MOUSEMOVE:
         mouse_x, mouse_y = x, y
-        target_point = (x, y)
+        raw_target = (x, y)
 
 
 def floodfill_background():
