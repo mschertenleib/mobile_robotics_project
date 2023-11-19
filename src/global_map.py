@@ -36,7 +36,7 @@ def normalize(img: np.ndarray):
 
 def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> bool:
     """
-    Checks for an intersection between the half-open segment ]a---b] and closed segments [c[i]---d[i]]
+    Checks for an intersection between the open segment ]a---b[ and closed segments [c[i]---d[i]]
     """
 
     ab = b - a
@@ -49,22 +49,22 @@ def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarra
 
     # Detects intersections between non-colinear segments
     if np.any(
-            (((cb_cd >= 0) & (ca_cd < 0)) | ((cb_cd <= 0) & (ca_cd > 0))) & (
-                    ((ad_ab > 0) & (ac_ab < 0)) | ((ad_ab < 0) & (ac_ab > 0)))):
+            (((cb_cd > 0) & (ca_cd < 0)) | ((cb_cd < 0) & (ca_cd > 0))) & (
+                    ((ad_ab >= 0) & (ac_ab <= 0)) | ((ad_ab <= 0) & (ac_ab >= 0)))):
         return True
 
     colinear_mask = (cb_cd == 0) & (ca_cd == 0) & (ad_ab == 0) & (ac_ab == 0)
     ac_dot_ab = ac[:, 0] * ab[0] + ac[:, 1] * ab[1]
     ab_dot_cd = ab[0] * cd[:, 0] + ab[1] * cd[:, 1]
     ab_dot_ab = ab[0] * ab[0] + ab[1] * ab[1]
-    mask_dir_same = (ab_dot_cd > 0) & (ac_dot_ab + ab_dot_cd > 0) & (ac_dot_ab - ab_dot_ab <= 0)
-    mask_dir_opposite = (ab_dot_cd < 0) & (ac_dot_ab > 0) & (ac_dot_ab + ab_dot_cd - ab_dot_ab <= 0)
+    mask_dir_same = (ab_dot_cd > 0) & (ac_dot_ab + ab_dot_cd > 0) & (ac_dot_ab - ab_dot_ab < 0)
+    mask_dir_opposite = (ab_dot_cd < 0) & (ac_dot_ab > 0) & (ac_dot_ab + ab_dot_cd - ab_dot_ab < 0)
     return np.any(colinear_mask & (mask_dir_same | mask_dir_opposite))
 
 
 def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> bool:
     """
-    Checks for an intersection between the half-open segment ]pt1---pt2] and all contours
+    Checks for an intersection between the open segment ]pt1---pt2[ and all contours
     """
     for contour in contours:
         if segments_intersect(pt1, pt2, contour[:-1], contour[1:]):
@@ -257,6 +257,49 @@ def reconstruct_path(prev, source: int, target: int) -> list[int]:
     return path
 
 
+def project(pt, contour):
+    """
+    Returns the point on the contour that is the closest to pt
+    """
+
+    closest_point = np.array([np.inf, np.inf])
+    min_distance = np.inf
+
+    for i in range(len(contour)):
+        pt1 = contour[i]
+        pt2 = contour[i + 1 if i < len(contour) - 1 else 0]
+        edge = pt2 - pt1
+        to_pt1 = pt1 - pt
+        to_pt2 = pt2 - pt
+        normal = np.float32([-edge[1], edge[0]])
+        n_cross_pt1 = np.cross(normal, to_pt1)
+        n_cross_pt2 = np.cross(normal, to_pt2)
+        if (n_cross_pt1 < 0 < n_cross_pt2) or (n_cross_pt1 > 0 > n_cross_pt2):
+            normal /= np.linalg.norm(normal)
+            distance = np.dot(to_pt1, normal)
+            if np.abs(distance) < min_distance:
+                closest_point = pt + (distance + 1e-2) * normal
+                min_distance = np.abs(distance)
+        else:
+            distance = np.linalg.norm(to_pt1)
+            if distance < min_distance:
+                closest_point = pt1
+                min_distance = distance
+            distance = np.linalg.norm(to_pt2)
+            if distance < min_distance:
+                closest_point = pt2
+                min_distance = distance
+
+    return closest_point
+
+
+def push_out(pt, contours):
+    for contour in contours:
+        if cv2.pointPolygonTest(contour, pt, measureDist=False) > 0:
+            return project(pt, contour)
+    return np.array(pt)
+
+
 mouse_x, mouse_y = 0, 0
 target_point = (120, 730)
 
@@ -321,11 +364,9 @@ def main():
     num_edges_target = len(graph.adjacency[Graph.TARGET])
     print(f'Number of edges to target: {num_edges_target}')
 
-    path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
-
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', img.shape[1], img.shape[0])
-    cv2.setMouseCallback('main', on_click)
+    cv2.setMouseCallback('main', mouse_callback)
     while True:
         update_graph(graph, contours, np.array(source_point), np.array(target_point))
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
@@ -340,6 +381,10 @@ def main():
             cv2.line(img, graph.vertices[path[i]], graph.vertices[path[i + 1]], color=(64, 64, 192), thickness=3)
         cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
         cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
+
+        proj = push_out(target_point, contours)
+        cv2.circle(img, proj.astype(int), color=(0, 0, 0), radius=6, thickness=-1)
+
         # draw_contour_orientations(img, contours, orientations)
         cv2.imshow('main', normalize(img))
         if cv2.waitKey(1) == 27:
@@ -347,9 +392,9 @@ def main():
     cv2.destroyAllWindows()
 
 
-def on_click(event, x, y, flags, param):
+def mouse_callback(event, x, y, flags, param):
     global mouse_x, mouse_y, target_point
-    if event == cv2.EVENT_LBUTTONDOWN:
+    if event == cv2.EVENT_MOUSEMOVE:
         mouse_x, mouse_y = x, y
         target_point = (x, y)
 
@@ -360,7 +405,7 @@ def floodfill_background():
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', img.shape[1], img.shape[0])
-    cv2.setMouseCallback('main', on_click)
+    cv2.setMouseCallback('main', mouse_callback)
     cv2.imshow('main', normalize(img))
     cv2.waitKey(0)
 
