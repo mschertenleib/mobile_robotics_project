@@ -71,7 +71,7 @@ def extract_convex_vertices(contours):
 
 
 def extract_static_edges(contours, vertices, to_prev, to_next):
-    edges = []
+    edges = [[] for _ in range(len(vertices))]
     for i in range(len(vertices)):
         for j in range(i + 1, len(vertices)):
 
@@ -95,12 +95,13 @@ def extract_static_edges(contours, vertices, to_prev, to_next):
             if not are_ij_connected and segment_intersects_contours(vertices[i], vertices[j], contours):
                 continue
 
-            edges.append([i, j])
+            edges[i].append(j)
+            edges[j].append(i)
 
     return edges
 
 
-def extract_dynamic_connected_vertices(contours, vertices, to_prev, to_next, point):
+def extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
     edges = []
     for i in range(len(vertices)):
         edge = vertices[i] - point
@@ -184,18 +185,21 @@ def main():
     vertices, to_prev, to_next = extract_convex_vertices(contours)
     print(f'Number of convex vertices: {len(vertices)}')
     edges = extract_static_edges(contours, vertices, to_prev, to_next)
-    print(f'Number of static edges: {len(edges)}')
-    source_connections = extract_dynamic_connected_vertices(contours, vertices, to_prev, to_next,
-                                                            np.array(source_point))
-    target_connections = extract_dynamic_connected_vertices(contours, vertices, to_prev, to_next,
-                                                            np.array(target_point))
-    print(f'Number of dynamic edges: {len(source_connections) + len(target_connections)}')
+    num_edges = sum([len([j for j in edges[i] if j > i]) for i in range(len(edges))])
+    print(f'Number of static edges: {num_edges}')
+    source_edges = extract_dynamic_edges(contours, vertices, to_prev, to_next,
+                                         np.array(source_point))
+    target_edges = extract_dynamic_edges(contours, vertices, to_prev, to_next,
+                                         np.array(target_point))
+    print(f'Number of dynamic edges: {len(source_edges) + len(target_edges)}')
 
-    for i, j in edges:
-        cv2.line(img, vertices[i], vertices[j], color=(0, 0, 0))
-    for i in source_connections:
+    for i in range(len(edges)):
+        for j in edges[i]:
+            if j > i:
+                cv2.line(img, vertices[i], vertices[j], color=(0, 0, 0))
+    for i in source_edges:
         cv2.line(img, source_point, vertices[i], color=(64, 192, 64))
-    for i in target_connections:
+    for i in target_edges:
         cv2.line(img, target_point, vertices[i], color=(64, 64, 192))
     cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
     cv2.circle(img, target_point, color=(64, 64, 192), radius=6, thickness=-1)
