@@ -54,7 +54,6 @@ def correct_perspective():
 
 def reconstruct_thymio():
     img = np.zeros((400, 400, 3), dtype=np.uint8)
-    # TODO: convert to HSV for detecting dots? But might actually be worse
 
     tip = np.float32([200, 140])
     left = np.float32([180, 280])
@@ -75,7 +74,7 @@ def reconstruct_thymio():
     cv2.destroyAllWindows()
 
 
-def get_obstacle_mask(color_image, source_point):
+def get_obstacle_mask(color_image, source_point=None):
     threshold = 200
     kernel_size = 50
     img = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
@@ -84,14 +83,17 @@ def get_obstacle_mask(color_image, source_point):
                                        (kernel_size, kernel_size))
     img = cv2.dilate(img, kernel)
 
+    # TODO: well, we might not actually need the floodfill, especially if we want to be robust
+
     # Flood fill from the robot location, so we only get the contours that
     # are relevant. Note that this requires to know the position of the robot
     # a priori, and might not be suitable if the map has several disconnected
     # regions across which the robot might get kidnapped
-    mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), dtype=np.uint8)
-    assert np.all(img[source_point[1], source_point[0]] == 0), 'Flood fill seed point is not in free space'
-    _, img, _, _ = cv2.floodFill(img, mask=mask, seedPoint=source_point, newVal=2)
-    _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY_INV)
+    # mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), dtype=np.uint8)
+    # assert np.all(img[source_point[1], source_point[0]] == 0), 'Flood fill seed point is not in free space'
+    # NOTE: we could actually just use the mask here, instead of thresholding
+    # _, img, _, _ = cv2.floodFill(img, mask=mask, seedPoint=source_point, newVal=2)
+    # _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY_INV)
 
     return img
 
@@ -130,5 +132,5 @@ def floodfill_background():
 
 if __name__ == '__main__':
     # floodfill_background()
-    # correct_perspective()
-    reconstruct_thymio()
+    correct_perspective()
+    # reconstruct_thymio()

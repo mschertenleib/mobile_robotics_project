@@ -297,12 +297,9 @@ raw_target = (120, 730)
 def main():
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    source_point = np.array([200, 100])
+    raw_source = (100, 100)
     color_image = cv2.imread('../map.png')
-    image_info(color_image)
-    # color_image = cv2.resize(color_image, dsize=(color_image.shape[1] // 4, color_image.shape[0] // 4))
-    # image_info(color_image)
-    obstacle_mask = get_obstacle_mask(color_image, source_point)
+    obstacle_mask = get_obstacle_mask(color_image)
 
     # NOTE: using RETR_EXTERNAL means we would only get the outer contours,
     # which is basically equivalent to floodfilling the binary image from the
@@ -338,9 +335,11 @@ def main():
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
     cv2.setMouseCallback('main', mouse_callback)
+
+    source_point = push_out(np.array(raw_source), contours, orientations, hierarchy)
     while True:
         target_point = push_out(np.array(raw_target), contours, orientations, hierarchy)
-        update_graph(graph, contours, np.array(source_point), target_point)
+        update_graph(graph, contours, source_point, target_point)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, walkable, 0.25, 0.0)
@@ -353,7 +352,11 @@ def main():
         for i in range(len(path) - 1):
             cv2.line(img, graph.vertices[path[i]].astype(np.int32), graph.vertices[path[i + 1]].astype(np.int32),
                      color=(64, 64, 192), thickness=3)
-        cv2.circle(img, source_point, color=(64, 192, 64), radius=6, thickness=-1)
+
+        cv2.line(img, raw_source, source_point.astype(np.int32), color=(0, 0, 0), thickness=3)
+        cv2.circle(img, source_point.astype(np.int32), color=(64, 192, 64), radius=6, thickness=-1)
+        cv2.circle(img, raw_source, color=(0, 0, 0), radius=6, thickness=-1)
+
         cv2.line(img, raw_target, target_point.astype(np.int32), color=(0, 0, 0), thickness=3)
         cv2.circle(img, target_point.astype(np.int32), color=(64, 64, 192), radius=6, thickness=-1)
         cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
