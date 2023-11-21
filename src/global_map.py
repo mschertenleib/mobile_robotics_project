@@ -297,7 +297,7 @@ raw_target = (120, 730)
 def main():
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    raw_source = (100, 100)
+    raw_source = (200, 100)
     color_image = cv2.imread('../map.png')
     obstacle_mask = get_obstacle_mask(color_image)
 
@@ -336,7 +336,8 @@ def main():
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
     cv2.setMouseCallback('main', mouse_callback)
 
-    source_point = push_out(np.array(raw_source), contours, orientations, hierarchy)
+    # source_point = push_out(np.array(raw_source), contours, orientations, hierarchy)
+    source_point = np.array(raw_source)
     while True:
         target_point = push_out(np.array(raw_target), contours, orientations, hierarchy)
         update_graph(graph, contours, source_point, target_point)
