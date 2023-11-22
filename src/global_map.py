@@ -325,6 +325,7 @@ def main():
     walkable[:] = (192, 64, 64)
     cv2.drawContours(walkable, contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
 
+    # FIXME: obstacle collision not detected when the source is on a vertex
     graph = build_graph(contours)
 
     print(f'Number of static convex vertices: {len(graph.vertices) - 2}')

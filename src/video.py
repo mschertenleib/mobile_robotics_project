@@ -1,5 +1,6 @@
-from image_processing import *
+import cv2
 
+from image_processing import *
 
 mouse_x, mouse_y = 0, 0
 
@@ -19,18 +20,19 @@ def main():
         if not ret:
             print('Cannot read frame')
             break
+        img = cv2.GaussianBlur(frame, (15, 15), 0)
 
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        lower_red = np.array([165, 100, 100])
-        upper_red = np.array([179, 255, 255])
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        lower_red = np.array([60, 50, 50])
+        upper_red = np.array([80, 255, 255])
 
-        hsv = cv2.GaussianBlur(hsv, (15, 15), 0)
         global mouse_x, mouse_y
         print(hsv[mouse_y, mouse_x])
 
         mask = cv2.inRange(hsv, lower_red, upper_red)
 
-        cv2.imshow('frame', hsv)
+        cv2.imshow('img', img)
+        cv2.imshow('frame', hsv[:, :, 0])
         cv2.setMouseCallback('frame', mouse_callback)
         cv2.imshow('mask', mask)
 

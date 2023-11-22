@@ -16,15 +16,26 @@ def normalize(img: np.ndarray):
         return (img.astype(np.float32) - img.min()) / range_values
 
 
-def transform(matrix, point):
+def transform_perspective(matrix, point):
     transformed = matrix @ np.float32([point[0], point[1], 1])
     return transformed[0:2] / transformed[2]
+
+
+def transform_affine(matrix, point):
+    transformed = matrix @ np.float32([point[0], point[1], 1])
+    return transformed
 
 
 def draw_thymio(img, position: np.ndarray, angle: float):
     rot = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
     points = position.astype(float) + (rot @ Thymio.outline.T).T
     cv2.polylines(img, [points.astype(int)], isClosed=True, color=(255, 255, 255))
+
+
+def get_image_to_world(width_px, height_px, width_mm, height_mm):
+    src = np.float32([[0, 0], [width_px, 0], [0, height_px]])
+    dst = np.float32([[0, height_mm], [width_mm, height_mm], [0, 0]])
+    return cv2.getAffineTransform(src, dst)
 
 
 def correct_perspective():
@@ -41,7 +52,7 @@ def correct_perspective():
 
     for pt in pts_src:
         cv2.circle(img, center=pt.astype(int), radius=5, color=(0, 0, 255), thickness=-1)
-    center = transform(inv_matrix, [dst_width / 3, dst_height / 3]).astype(int)
+    center = transform_perspective(inv_matrix, [dst_width / 3, dst_height / 3]).astype(int)
     cv2.circle(img, center=center, radius=5, color=(255, 0, 0), thickness=-1)
     cv2.imshow('main', img)
     cv2.waitKey(0)
@@ -53,28 +64,36 @@ def correct_perspective():
 
 
 def reconstruct_thymio():
+    # X axis towards the right
+    # Y axis towards the front
+    # theta from x to y
+
+    POINT_BACK = (0, -10)
+    POINT_FRONT_LEFT = (-30, 60)
+    POINT_FRONT_RIGHT = (30, 60)
+
     img = np.zeros((400, 400, 3), dtype=np.uint8)
 
-    tip = np.float32([200, 140])
-    left = np.float32([180, 280])
-    right = np.float32([300, 250])
-    center = (left + right) * 0.5
+    back = np.int32([200, 140])
+    front_left = np.int32([180, 280])
+    front_right = np.int32([300, 250])
+    front_center = (front_left + front_right) // 2
 
-    cv2.line(img, center.astype(int), tip.astype(int), color=(255, 255, 255))
-    cv2.circle(img, center=tip.astype(int), radius=5, color=(255, 0, 0), thickness=-1)
-    cv2.circle(img, center=left.astype(int), radius=5, color=(0, 0, 255), thickness=-1)
-    cv2.circle(img, center=right.astype(int), radius=5, color=(0, 255, 0), thickness=-1)
-    cv2.circle(img, center=center.astype(int), radius=5, color=(255, 255, 255), thickness=-1)
+    cv2.line(img, front_center, back, color=(255, 255, 255))
+    cv2.circle(img, center=back, radius=5, color=(255, 255, 255), thickness=-1)
+    cv2.circle(img, center=front_left, radius=5, color=(0, 0, 255), thickness=-1)
+    cv2.circle(img, center=front_right, radius=5, color=(0, 255, 0), thickness=-1)
+    cv2.circle(img, center=front_center, radius=5, color=(255, 255, 255), thickness=-1)
 
-    dir = tip - center
-    draw_thymio(img, center, np.arctan2(-dir[0], dir[1]))
+    dir = front_center - back
+    draw_thymio(img, back, np.arctan2(-dir[0], dir[1]))
 
     cv2.imshow('main', img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 
-def get_obstacle_mask(color_image, source_point=None):
+def get_obstacle_mask(color_image):
     threshold = 200
     kernel_size = 50
     img = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
@@ -132,5 +151,30 @@ def floodfill_background():
 
 if __name__ == '__main__':
     # floodfill_background()
-    correct_perspective()
+    # correct_perspective()
     # reconstruct_thymio()
+
+    # Transformations we need:
+    # - original image -> perspective corrected
+    # -     detect the thymio in that space: (x, y, theta) in image space (left-handed system!)
+    # - perspective corrected image space -> world space: simple affine transform (pixels -> mm)
+    # - use the world space for everything else (graph, thymio position to send to filter)
+    # Well, actually it would be much better to build the graph in image space
+    #  -> integer coordinates -> exact equality tests
+
+    width_px = 800
+    height_px = 800
+    width_mm = 1000
+    height_mm = 1000
+
+    # NOTE: this switches from left-handed to right-handed, maybe too confusing
+    M = get_image_to_world(width_px, height_px, width_mm, height_mm)
+
+    def print_transform(matrix, pt):
+        print(f'{pt} -> {transform_affine(matrix, pt)}')
+
+    print_transform(M, (0, 0))
+    print_transform(M, (width_px, 0))
+    print_transform(M, (0, height_px))
+    print_transform(M, (width_px, height_px))
+    print_transform(M, (width_px // 4, height_px // 4))
