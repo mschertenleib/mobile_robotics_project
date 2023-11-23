@@ -39,7 +39,7 @@ def get_image_to_world(width_px, height_px, width_mm, height_mm):
 
 
 def correct_perspective():
-    img = cv2.imread('../perspective_box.jpg')
+    img = cv2.imread('../images/perspective_box.jpg')
     assert img is not None
     dsize = (img.shape[1] // 8, img.shape[0] // 8)
     img = cv2.resize(img, dsize)
@@ -99,21 +99,15 @@ def get_obstacle_mask(color_image):
     kernel_size = 50
     img = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                       (kernel_size, kernel_size))
+
+    # Create borders
+    img[:, 0] = 1
+    img[:, -1] = 1
+    img[0, :] = 1
+    img[-1, :] = 1
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
     img = cv2.dilate(img, kernel)
-
-    # TODO: well, we might not actually need the floodfill, especially if we want to be robust
-
-    # Flood fill from the robot location, so we only get the contours that
-    # are relevant. Note that this requires to know the position of the robot
-    # a priori, and might not be suitable if the map has several disconnected
-    # regions across which the robot might get kidnapped
-    # mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), dtype=np.uint8)
-    # assert np.all(img[source_point[1], source_point[0]] == 0), 'Flood fill seed point is not in free space'
-    # NOTE: we could actually just use the mask here, instead of thresholding
-    # _, img, _, _ = cv2.floodFill(img, mask=mask, seedPoint=source_point, newVal=2)
-    # _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY_INV)
 
     return img
 
@@ -128,7 +122,7 @@ def mouse_callback(event, x, y, flags, param):
 
 
 def floodfill_background():
-    img = cv2.imread('../map.png')
+    img = cv2.imread('../images/map.png')
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
@@ -150,11 +144,7 @@ def floodfill_background():
     cv2.destroyAllWindows()
 
 
-if __name__ == '__main__':
-    # floodfill_background()
-    correct_perspective()
-    # reconstruct_thymio()
-
+def test_transforms():
     # Transformations we need:
     # - original image -> perspective corrected
     # -     detect the thymio in that space: (x, y, theta) in image space (left-handed system!)
@@ -179,3 +169,52 @@ if __name__ == '__main__':
     print_transform(M, (0, height_px))
     print_transform(M, (width_px, height_px))
     print_transform(M, (width_px // 4, height_px // 4))
+
+
+def draw_contour_orientations(img, contours, orientations):
+    """
+    Draw positive orientation as green, negative as red;
+    first vertex is black, last is white
+    """
+    img[:] = (192, 192, 192)
+    for c in range(len(contours)):
+        color = (64, 192, 64) if orientations[c] >= 0 else (64, 64, 192)
+        cv2.drawContours(img, [contours[c]], contourIdx=-1, color=color, thickness=3)
+        n_points = len(contours[c])
+        for i in range(n_points):
+            brightness = i / (n_points - 1) * 255
+            cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
+
+
+def test_obstacle_mask():
+    approx_poly_epsilon = 2
+    color_image = cv2.imread('../images/map_divided.png')
+    obstacle_mask = get_obstacle_mask(color_image)
+
+    contours, hierarchy = cv2.findContours(obstacle_mask, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
+    contours = [cv2.approxPolyDP(contour, epsilon=approx_poly_epsilon, closed=True) for contour in contours]
+    # Discard ill-formed approximations that have less than 3 vertices
+    # FIXME: we should update the hierarchy accordingly !!!
+    contours = [np.squeeze(contour) for contour in contours if len(contour) > 2]
+
+    orientations = [np.sign(cv2.contourArea(contour, oriented=True)) for contour in contours]
+
+    for c in range(len(contours)):
+        print(orientations[c], len(contours[c]))
+
+    img = color_image.copy()
+    draw_contour_orientations(img, contours, orientations)
+
+    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('main', img.shape[1], img.shape[0])
+    cv2.imshow('main', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    # floodfill_background()
+    # correct_perspective()
+    # reconstruct_thymio()
+    # test_transforms()
+    test_obstacle_mask()

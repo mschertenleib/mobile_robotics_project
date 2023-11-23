@@ -302,7 +302,7 @@ def main():
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
     raw_source = (200, 100)
-    color_image = cv2.imread('../map.png')
+    color_image = cv2.imread('../images/map.png')
     obstacle_mask = get_obstacle_mask(color_image)
 
     # NOTE: using RETR_EXTERNAL means we would only get the outer contours,
