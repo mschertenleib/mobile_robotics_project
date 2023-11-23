@@ -1,4 +1,5 @@
 .idea
 __pycache__
 imgui.ini
-*/imgui.ini
+src/imgui.ini
+utils/imgui.ini

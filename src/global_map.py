@@ -65,6 +65,7 @@ def _extract_convex_vertices(contours):
     to_prev = []
     to_next = []
     for contour in contours:
+        # TODO: this could be vectorized if necessary
         for i in range(len(contour)):
             to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
             to_next_i = contour[i + 1 if i < len(contour) - 1 else 0] - contour[i]
@@ -109,6 +110,8 @@ def _extract_static_adjacency(contours, vertices, to_prev, to_next):
 
 def _extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
     edges = []
+    # FIXME: we must not consider intersection if the only contact with a contour is by a vertex
+    #  Actually, shouldn't that already be the case ??? Since we check the open segment
     for i in range(len(vertices)):
 
         # Discard vertices for which the previous and next one lie on opposite sides of the edge
@@ -165,6 +168,7 @@ def update_graph(graph, contours, source, target):
     for edge in graph.adjacency[Graph.TARGET]:
         graph.adjacency[edge.vertex].append(Edge(vertex=Graph.TARGET, length=edge.length))
 
+    # FIXME: this somehow fails when source is on a vertex
     # Add the direct edge from source to target
     if not segment_intersects_contours(source, target, contours):
         edge_length = np.linalg.norm(target - source)
@@ -340,7 +344,7 @@ def main():
     # source_point = push_out(np.array(raw_source), contours, orientations, hierarchy)
     source_point = np.array(raw_source)
     while True:
-        target_point = push_out(np.array(raw_target), contours, orientations, hierarchy)
+        target_point = np.array(raw_target)
         update_graph(graph, contours, source_point, target_point)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 

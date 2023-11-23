@@ -41,7 +41,8 @@ def get_image_to_world(width_px, height_px, width_mm, height_mm):
 def correct_perspective():
     img = cv2.imread('../perspective_box.jpg')
     assert img is not None
-    img = cv2.resize(img, (img.shape[1] // 8, img.shape[0] // 8))
+    dsize = (img.shape[1] // 8, img.shape[0] // 8)
+    img = cv2.resize(img, dsize)
 
     pts_src = np.float32([[226, 173], [408, 273], [78, 275], [258, 424]])
     dst_width = 146 * 4
@@ -151,7 +152,7 @@ def floodfill_background():
 
 if __name__ == '__main__':
     # floodfill_background()
-    # correct_perspective()
+    correct_perspective()
     # reconstruct_thymio()
 
     # Transformations we need:

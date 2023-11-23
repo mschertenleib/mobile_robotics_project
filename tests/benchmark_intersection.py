@@ -51,11 +51,9 @@ def segments_intersect_explicit(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: 
     return np.any(colinear_mask & (mask_dir_same | mask_dir_opposite))
 
 
-if __name__ == '__main__':
+def main():
     min_value = 0
     max_value = 400
-    nt = 0
-    nf = 0
     for i in range(10000):
         a = np.random.randint(min_value, max_value, 2)
         b = np.random.randint(min_value, max_value, 2)
@@ -69,3 +67,7 @@ if __name__ == '__main__':
     t_explicit = timeit.Timer(lambda: segments_intersect_explicit(a, b, c, d)).timeit(repeats)
     print(f'cross version: {t_cross:.3f} seconds')
     print(f'explicit version: {t_explicit:.3f} seconds ({(t_explicit - t_cross) / t_cross * 100.0:+.2f}%)')
+
+
+if __name__ == '__main__':
+    main()
