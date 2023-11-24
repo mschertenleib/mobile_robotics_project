@@ -1,5 +1,3 @@
-import cv2
-
 from image_processing import *
 
 mouse_x, mouse_y = 0, 0
@@ -20,6 +18,8 @@ def main():
         if not ret:
             print('Cannot read frame')
             break
+
+        # TODO: look into fastNlMeansDenoising
         img = cv2.GaussianBlur(frame, (15, 15), 0)
 
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -31,9 +31,9 @@ def main():
 
         mask = cv2.inRange(hsv, lower_red, upper_red)
 
-        cv2.imshow('img', img)
-        cv2.imshow('frame', hsv[:, :, 0])
-        cv2.setMouseCallback('frame', mouse_callback)
+        cv2.imshow('color', img)
+        cv2.imshow('hue', hsv[:, :, 0])
+        cv2.setMouseCallback('hue', mouse_callback)
         cv2.imshow('mask', mask)
 
         if cv2.waitKey(1) & 0xff == 27:

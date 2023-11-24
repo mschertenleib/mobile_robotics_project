@@ -61,20 +61,42 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
 
 
 def _extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
-    raw_contours, raw_hierarchy = cv2.findContours(obstacle_mask, mode=cv2.RETR_TREE,
+    inverted_mask = 1 - obstacle_mask.clip(0, 1)
+    raw_contours, raw_hierarchy = cv2.findContours(inverted_mask, mode=cv2.RETR_CCOMP,
                                                    method=cv2.CHAIN_APPROX_SIMPLE)
     approx_contours = [cv2.approxPolyDP(contour, epsilon=epsilon, closed=True) for contour in raw_contours]
 
-    # Discard ill-formed contour approximations that have less than 3 vertices
-    contours = [np.squeeze(contour) for contour in approx_contours if len(contour) >= 3]
+    # Group contours following their hierarchy, and discard ill-formed contour approximations that have less
+    # than 3 vertices
+    contours = [[] for _ in range(len(approx_contours))]
+    for i in range(len(approx_contours)):
+        if len(approx_contours[i]) >= 3:
+            parent = raw_hierarchy[0][i][3]
+            if parent == -1:
+                contours[i].append(np.squeeze(approx_contours[i]))
+            else:
+                contours[parent].append(np.squeeze(approx_contours[i]))
+    contours = [group for group in contours if len(group) > 0]
+    print([len(cs) for cs in contours])
 
+    # FIXME(temporary): flatten the list
+    contours = [c for cs in contours for c in cs]
+
+    # FIXME: we don't actually need to compute the orientations now, we know them
     # NOTE: orientation is positive for a clockwise contour, which is the opposite of the mathematical standard
     # (right-hand rule). Note however that the outer contour of a shape is always
     # counter-clockwise (hence orientation is negative), and the contour of a hole is always clockwise (hence
     # orientation is positive).
     orientations = [np.sign(cv2.contourArea(contour, oriented=True)) for contour in contours]
 
-    return contours, raw_hierarchy, orientations
+    img = cv2.cvtColor(obstacle_mask * 255, cv2.COLOR_GRAY2BGR)
+    draw_contour_orientations(img, contours, orientations)
+    cv2.imshow('main', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    exit()
+
+    return contours, orientations
 
 
 def _extract_convex_vertices(contours):
@@ -203,14 +225,13 @@ def draw_contour_orientations(img, contours, orientations):
     Draw positive orientation as green, negative as red;
     first vertex is black, last is white
     """
-    img[:] = (192, 192, 192)
     for c in range(len(contours)):
         color = (64, 192, 64) if orientations[c] >= 0 else (64, 64, 192)
         cv2.drawContours(img, [contours[c]], contourIdx=-1, color=color, thickness=3)
         n_points = len(contours[c])
         for i in range(n_points):
             brightness = i / (n_points - 1) * 255
-            cv2.circle(img, contours[c][i][0], color=(brightness, brightness, brightness), radius=5, thickness=-1)
+            cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
 def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int) -> list[int]:
@@ -324,7 +345,7 @@ def main():
     color_image = cv2.imread('../images/map_divided.png')
     obstacle_mask = get_obstacle_mask(color_image)
 
-    contours, hierarchy, orientations = _extract_contours(obstacle_mask, approx_poly_epsilon)
+    contours, orientations = _extract_contours(obstacle_mask, approx_poly_epsilon)
 
     walkable = np.zeros(color_image.shape, dtype=np.uint8)
     walkable[:] = (192, 64, 64)
