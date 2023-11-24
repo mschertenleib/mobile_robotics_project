@@ -60,12 +60,28 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
     return False
 
 
+def _extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
+    raw_contours, raw_hierarchy = cv2.findContours(obstacle_mask, mode=cv2.RETR_TREE,
+                                                   method=cv2.CHAIN_APPROX_SIMPLE)
+    approx_contours = [cv2.approxPolyDP(contour, epsilon=epsilon, closed=True) for contour in raw_contours]
+
+    # Discard ill-formed contour approximations that have less than 3 vertices
+    contours = [np.squeeze(contour) for contour in approx_contours if len(contour) >= 3]
+
+    # NOTE: orientation is positive for a clockwise contour, which is the opposite of the mathematical standard
+    # (right-hand rule). Note however that the outer contour of a shape is always
+    # counter-clockwise (hence orientation is negative), and the contour of a hole is always clockwise (hence
+    # orientation is positive).
+    orientations = [np.sign(cv2.contourArea(contour, oriented=True)) for contour in contours]
+
+    return contours, raw_hierarchy, orientations
+
+
 def _extract_convex_vertices(contours):
     vertices = []
     to_prev = []
     to_next = []
     for contour in contours:
-        # TODO: this could be vectorized if necessary
         for i in range(len(contour)):
             to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
             to_next_i = contour[i + 1 if i < len(contour) - 1 else 0] - contour[i]
@@ -110,8 +126,6 @@ def _extract_static_adjacency(contours, vertices, to_prev, to_next):
 
 def _extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
     edges = []
-    # FIXME: we must not consider intersection if the only contact with a contour is by a vertex
-    #  Actually, shouldn't that already be the case ??? Since we check the open segment
     for i in range(len(vertices)):
 
         # Discard vertices for which the previous and next one lie on opposite sides of the edge
@@ -148,7 +162,13 @@ def build_graph(contours):
     return graph
 
 
-def update_graph(graph, contours, source, target):
+def update_graph(graph, contours, source, free_source, target, free_target):
+    """
+    Update the dynamic part of the graph. The considered vertices to be added in the graph are source and target,
+    but the visibility edges are extracted from free_source and free_target, which should be outside any obstacle.
+    This allows for source and target to be in obstacles, while behaving as if they were outside.
+    """
+
     # Remove old dynamic edges
     # NOTE: this relies on dynamic edges being the last ones in the neighbor lists
     for edge in graph.adjacency[Graph.SOURCE]:
@@ -160,15 +180,14 @@ def update_graph(graph, contours, source, target):
 
     # Extract new dynamic edges
     graph.adjacency[Graph.SOURCE] = _extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
-                                                           source)
+                                                           free_source)
     graph.adjacency[Graph.TARGET] = _extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
-                                                           target)
+                                                           free_target)
     for edge in graph.adjacency[Graph.SOURCE]:
         graph.adjacency[edge.vertex].append(Edge(vertex=Graph.SOURCE, length=edge.length))
     for edge in graph.adjacency[Graph.TARGET]:
         graph.adjacency[edge.vertex].append(Edge(vertex=Graph.TARGET, length=edge.length))
 
-    # FIXME: this somehow fails when source is on a vertex
     # Add the direct edge from source to target
     if not segment_intersects_contours(source, target, contours):
         edge_length = np.linalg.norm(target - source)
@@ -302,34 +321,15 @@ def main():
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
     raw_source = (200, 100)
-    color_image = cv2.imread('../images/map.png')
+    color_image = cv2.imread('../images/map_divided.png')
     obstacle_mask = get_obstacle_mask(color_image)
 
-    # NOTE: using RETR_EXTERNAL means we would only get the outer contours,
-    # which is basically equivalent to floodfilling the binary image from the
-    # outside prior to calling findContours. However, this assumes our region
-    # of interest is "outside", and would not work if we are "walled in",
-    # which is actually very likely
-    contours, hierarchy = cv2.findContours(obstacle_mask, mode=cv2.RETR_TREE,
-                                           method=cv2.CHAIN_APPROX_SIMPLE)
-    contours = [np.squeeze(cv2.approxPolyDP(contours[i], epsilon=approx_poly_epsilon, closed=True)) for i in
-                range(len(contours))]
-
-    # NOTE: orientation is positive for a clockwise contour, which is the opposite of the mathematical standard
-    # (right-hand rule). Note however that the outer contour of a shape is always
-    # counter-clockwise (hence orientation is negative), and the contour of a hole is always clockwise (hence
-    # orientation is positive).
-    orientations = [np.sign(cv2.contourArea(contour, oriented=True)) for contour in contours]
-
-    # If we know that 'contours' only contains those in the region where the
-    # robot is located, we can use them directly for computing the visibility
-    # graph. Else, we must take into account the hierarchy.
+    contours, hierarchy, orientations = _extract_contours(obstacle_mask, approx_poly_epsilon)
 
     walkable = np.zeros(color_image.shape, dtype=np.uint8)
     walkable[:] = (192, 64, 64)
     cv2.drawContours(walkable, contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
 
-    # FIXME: obstacle collision not detected when the source is on a vertex
     graph = build_graph(contours)
 
     print(f'Number of static convex vertices: {len(graph.vertices) - 2}')
@@ -341,11 +341,13 @@ def main():
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
     cv2.setMouseCallback('main', mouse_callback)
 
-    # source_point = push_out(np.array(raw_source), contours, orientations, hierarchy)
-    source_point = np.array(raw_source)
+    # free_source = push_out(np.array(raw_source), contours, orientations, hierarchy)
+    free_source = np.array(raw_source)
+
     while True:
-        target_point = np.array(raw_target)
-        update_graph(graph, contours, source_point, target_point)
+        # free_target = push_out(np.array(raw_target), contours, orientations, hierarchy)
+        free_target = np.array(raw_target)
+        update_graph(graph, contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, walkable, 0.25, 0.0)
@@ -359,12 +361,12 @@ def main():
             cv2.line(img, graph.vertices[path[i]].astype(np.int32), graph.vertices[path[i + 1]].astype(np.int32),
                      color=(64, 64, 192), thickness=3)
 
-        cv2.line(img, raw_source, source_point.astype(np.int32), color=(0, 0, 0), thickness=3)
-        cv2.circle(img, source_point.astype(np.int32), color=(64, 192, 64), radius=6, thickness=-1)
+        cv2.line(img, raw_source, free_source.astype(np.int32), color=(0, 0, 0), thickness=3)
+        cv2.circle(img, free_source.astype(np.int32), color=(64, 192, 64), radius=6, thickness=-1)
         cv2.circle(img, raw_source, color=(0, 0, 0), radius=6, thickness=-1)
 
-        cv2.line(img, raw_target, target_point.astype(np.int32), color=(0, 0, 0), thickness=3)
-        cv2.circle(img, target_point.astype(np.int32), color=(64, 64, 192), radius=6, thickness=-1)
+        cv2.line(img, raw_target, free_target.astype(np.int32), color=(0, 0, 0), thickness=3)
+        cv2.circle(img, free_target.astype(np.int32), color=(64, 64, 192), radius=6, thickness=-1)
         cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
 
         # draw_contour_orientations(img, contours, orientations)

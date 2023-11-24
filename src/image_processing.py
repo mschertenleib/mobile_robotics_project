@@ -95,6 +95,10 @@ def reconstruct_thymio():
 
 
 def get_obstacle_mask(color_image):
+    """
+    Returns a binary obstacle mask of the given image, where 1 represents an obstacle. An obstacle border is added.
+    """
+
     threshold = 200
     kernel_size = 50
     img = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
@@ -193,9 +197,11 @@ def test_obstacle_mask():
 
     contours, hierarchy = cv2.findContours(obstacle_mask, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
     contours = [cv2.approxPolyDP(contour, epsilon=approx_poly_epsilon, closed=True) for contour in contours]
+    print(len(contours))
     # Discard ill-formed approximations that have less than 3 vertices
     # FIXME: we should update the hierarchy accordingly !!!
     contours = [np.squeeze(contour) for contour in contours if len(contour) > 2]
+    print(len(contours))
 
     orientations = [np.sign(cv2.contourArea(contour, oriented=True)) for contour in contours]
 
