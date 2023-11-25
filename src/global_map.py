@@ -61,42 +61,39 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
 
 
 def _extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
+    """
+    Get a list of contour regions from the given obstacle_mask, using the given epsilon for polygon approximation.
+    Each contour region is a list of contours, where the first one is the outline of a region of free space,
+    and subsequent ones are outlines of obstacles enclosed within that region (or, equivalently, holes in the region).
+    The orientation of the region outline is negative (left-hand rule), and the orientation of the outline of
+    holes within the region is positive.
+    """
+
+    # Inverting the mask means we get the contours of free regions instead of the contours of obstacles
     inverted_mask = 1 - obstacle_mask.clip(0, 1)
+
+    # NOTE: we assume the orientation of retrieved contours is as explained above. This is not explicitly stated in the
+    # OpenCV documentation, but seems to be the case
     raw_contours, raw_hierarchy = cv2.findContours(inverted_mask, mode=cv2.RETR_CCOMP,
                                                    method=cv2.CHAIN_APPROX_SIMPLE)
     approx_contours = [cv2.approxPolyDP(contour, epsilon=epsilon, closed=True) for contour in raw_contours]
 
-    # Group contours following their hierarchy, and discard ill-formed contour approximations that have less
-    # than 3 vertices
-    contours = [[] for _ in range(len(approx_contours))]
+    # Group contours following their hierarchy
+    # NOTE: this assumes a parent appears before its children in the hierarchy
+    contour_regions = [[] for _ in range(len(approx_contours))]
     for i in range(len(approx_contours)):
+        # Only keep contour approximations that have at least 3 vertices
         if len(approx_contours[i]) >= 3:
             parent = raw_hierarchy[0][i][3]
-            if parent == -1:
-                contours[i].append(np.squeeze(approx_contours[i]))
-            else:
-                contours[parent].append(np.squeeze(approx_contours[i]))
-    contours = [group for group in contours if len(group) > 0]
-    print([len(cs) for cs in contours])
+            # If parent is -1, the contour is the top-level outline of its own region.
+            # Else, it is the outline of a hole in its parent region.
+            region = i if parent == -1 else parent
+            contour_regions[region].append(np.squeeze(approx_contours[i]))
 
-    # FIXME(temporary): flatten the list
-    contours = [c for cs in contours for c in cs]
+    # Remove empty groups
+    contour_regions = [group for group in contour_regions if len(group) > 0]
 
-    # FIXME: we don't actually need to compute the orientations now, we know them
-    # NOTE: orientation is positive for a clockwise contour, which is the opposite of the mathematical standard
-    # (right-hand rule). Note however that the outer contour of a shape is always
-    # counter-clockwise (hence orientation is negative), and the contour of a hole is always clockwise (hence
-    # orientation is positive).
-    orientations = [np.sign(cv2.contourArea(contour, oriented=True)) for contour in contours]
-
-    img = cv2.cvtColor(obstacle_mask * 255, cv2.COLOR_GRAY2BGR)
-    draw_contour_orientations(img, contours, orientations)
-    cv2.imshow('main', img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    exit()
-
-    return contours, orientations
+    return contour_regions
 
 
 def _extract_convex_vertices(contours):
@@ -107,7 +104,7 @@ def _extract_convex_vertices(contours):
         for i in range(len(contour)):
             to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
             to_next_i = contour[i + 1 if i < len(contour) - 1 else 0] - contour[i]
-            if np.cross(to_prev_i, to_next_i) >= 0:
+            if np.cross(to_prev_i, to_next_i) <= 0:
                 vertices.append(contour[i])
                 to_prev.append(to_prev_i)
                 to_next.append(to_next_i)
@@ -220,13 +217,14 @@ def update_graph(graph, contours, source, free_source, target, free_target):
     graph.vertices[Graph.TARGET] = target
 
 
-def draw_contour_orientations(img, contours, orientations):
+def draw_contour_orientations(img, contours):
     """
     Draw positive orientation as green, negative as red;
     first vertex is black, last is white
     """
     for c in range(len(contours)):
-        color = (64, 192, 64) if orientations[c] >= 0 else (64, 64, 192)
+        orientation = np.sign(cv2.contourArea(contours[c], oriented=True))
+        color = (64, 192, 64) if orientation >= 0 else (64, 64, 192)
         cv2.drawContours(img, [contours[c]], contourIdx=-1, color=color, thickness=3)
         n_points = len(contours[c])
         for i in range(n_points):
@@ -345,13 +343,16 @@ def main():
     color_image = cv2.imread('../images/map_divided.png')
     obstacle_mask = get_obstacle_mask(color_image)
 
-    contours, orientations = _extract_contours(obstacle_mask, approx_poly_epsilon)
+    contour_regions = _extract_contours(obstacle_mask, approx_poly_epsilon)
 
-    walkable = np.zeros(color_image.shape, dtype=np.uint8)
-    walkable[:] = (192, 64, 64)
-    cv2.drawContours(walkable, contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
+    # FIXME: we are flattening all regions
+    contour_regions = [contour for region in contour_regions for contour in region]
 
-    graph = build_graph(contours)
+    free_space = np.empty_like(color_image)
+    free_space[:] = (64, 64, 192)
+    cv2.drawContours(free_space, contour_regions, contourIdx=-1, color=(255, 255, 255), thickness=-1)
+
+    graph = build_graph(contour_regions)
 
     print(f'Number of static convex vertices: {len(graph.vertices) - 2}')
     num_static_edges = sum(
@@ -368,11 +369,11 @@ def main():
     while True:
         # free_target = push_out(np.array(raw_target), contours, orientations, hierarchy)
         free_target = np.array(raw_target)
-        update_graph(graph, contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
+        update_graph(graph, contour_regions, np.array(raw_source), free_source, np.array(raw_target), free_target)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
-        img = cv2.addWeighted(color_image, 0.75, walkable, 0.25, 0.0)
-        cv2.drawContours(img, contours, contourIdx=-1, color=(64, 64, 192))
+        img = cv2.addWeighted(color_image, 0.75, free_space, 0.25, 0.0)
+        cv2.drawContours(img, contour_regions, contourIdx=-1, color=(64, 64, 192))
         for i in range(len(graph.adjacency)):
             for edge in graph.adjacency[i]:
                 if edge.vertex > i or edge.vertex < 0:
