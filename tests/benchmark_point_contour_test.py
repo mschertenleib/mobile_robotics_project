@@ -1,7 +1,5 @@
 import timeit
 
-import numpy as np
-
 from global_map import *
 
 

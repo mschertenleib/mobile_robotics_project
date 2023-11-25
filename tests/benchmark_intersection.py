@@ -62,9 +62,8 @@ def main():
         res1 = segments_intersect_cross(a, b, c, d)
         res2 = segments_intersect_explicit(a, b, c, d)
         assert res1 == res2
-    repeats = 10000
-    t_cross = timeit.Timer(lambda: segments_intersect_cross(a, b, c, d)).timeit(repeats)
-    t_explicit = timeit.Timer(lambda: segments_intersect_explicit(a, b, c, d)).timeit(repeats)
+    number, t_cross = timeit.Timer(lambda: segments_intersect_cross(a, b, c, d)).autorange()
+    t_explicit = timeit.Timer(lambda: segments_intersect_explicit(a, b, c, d)).timeit(number)
     print(f'cross version: {t_cross:.3f} seconds')
     print(f'explicit version: {t_explicit:.3f} seconds ({(t_explicit - t_cross) / t_cross * 100.0:+.2f}%)')
 

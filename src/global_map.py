@@ -381,13 +381,11 @@ def draw_distance_to_contours(img_width: int, img_height: int, regions: list[lis
     return img
 
 
-def push_out(pt: np.ndarray, regions) -> np.ndarray:
+def push_out(point: cv2.typing.Point2f, regions: list[list[cv2.typing.MatLike]]):
     for region_contours in regions:
-        for i in range(len(region_contours)):
-            polygon_test = cv2.pointPolygonTest(region_contours[i], pt.astype(float), measureDist=False)
-            if (orientations[i] < 0 and polygon_test > 0) or (orientations[i] > 0 and polygon_test < 0):
-                return project(pt, region_contours[i])
-    return pt
+        dist = distance_to_contours(point, region_contours)
+    assert False, 'push_out is broken for now'
+    return point
 
 
 raw_target = (120, 730)
@@ -491,6 +489,6 @@ def contour_distance_test():
 
 
 if __name__ == '__main__':
-    # main()
+    main()
     # pathfinding_test()
-    contour_distance_test()
+    # contour_distance_test()
