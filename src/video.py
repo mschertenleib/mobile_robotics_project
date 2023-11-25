@@ -23,7 +23,20 @@ def detect_robot():
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        cv2.imshow('color', img)
+        contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        vertices = []
+        for contour in contours:
+            moments = cv2.moments(contour)
+            px = int(moments["m10"] / moments["m00"])
+            py = int(moments["m01"] / moments["m00"])
+            vertices.append(np.array([px, py]))
+
+        cv2.drawContours(img, contours, contourIdx=-1, color=(255, 255, 255))
+        cv2.polylines(img, [np.array(vertices)], isClosed=True, color=(0, 255, 0))
+        for vertex in vertices:
+            cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
+
+        cv2.imshow('img', img)
         cv2.imshow('mask', mask)
 
         if cv2.waitKey(1) & 0xff == 27:
