@@ -4,7 +4,7 @@ from image_processing import *
 class Edge(object):
     __slots__ = ['vertex', 'length']
 
-    def __init__(self, vertex, length):
+    def __init__(self, vertex: int, length: float):
         self.vertex: int = vertex
         self.length: float = length
 
@@ -60,7 +60,7 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
     return False
 
 
-def extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
+def extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float) -> list[list[cv2.typing.MatLike]]:
     """
     Get a list of contour regions from the given obstacle_mask, using the given epsilon for polygon approximation.
     Each contour region is a list of contours, where the first one is the outline of a region of free space,
@@ -96,7 +96,7 @@ def extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
     return regions
 
 
-def extract_convex_vertices(contours):
+def extract_convex_vertices(contours: list[cv2.typing.MatLike]):
     vertices = []
     to_prev = []
     to_next = []
@@ -111,7 +111,7 @@ def extract_convex_vertices(contours):
     return vertices, to_prev, to_next
 
 
-def extract_static_adjacency(contours, vertices, to_prev, to_next):
+def extract_static_adjacency(contours: list[cv2.typing.MatLike], vertices, to_prev, to_next):
     adjacency = [[] for _ in range(len(vertices))]
     for i in range(len(vertices)):
         for j in range(i + 1, len(vertices)):
@@ -143,7 +143,7 @@ def extract_static_adjacency(contours, vertices, to_prev, to_next):
     return adjacency
 
 
-def extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
+def extract_dynamic_edges(contours: list[cv2.typing.MatLike], vertices, to_prev, to_next, point):
     edges = []
     for i in range(len(vertices)):
 
@@ -167,7 +167,7 @@ def extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
     return edges
 
 
-def build_graph(contours):
+def build_graph(contours: list[cv2.typing.MatLike]) -> Graph:
     vertices, to_prev, to_next = extract_convex_vertices(contours)
     adjacency = extract_static_adjacency(contours, vertices, to_prev, to_next)
     # Reserve source and target vertices
@@ -181,7 +181,7 @@ def build_graph(contours):
     return graph
 
 
-def update_graph(graph, contours, source, free_source, target, free_target):
+def update_graph(graph: Graph, contours, source, free_source, target, free_target):
     """
     Update the dynamic part of the graph. The considered vertices to be added in the graph are source and target,
     but the visibility edges are extracted from free_source and free_target, which should be outside any obstacle.
@@ -217,7 +217,7 @@ def update_graph(graph, contours, source, free_source, target, free_target):
     graph.vertices[Graph.TARGET] = target
 
 
-def draw_contour_orientations(img, contours):
+def draw_contour_orientations(img: cv2.typing.MatLike, contours):
     """
     Draw positive orientation as green, negative as red;
     first vertex is black, last is white
@@ -230,6 +230,27 @@ def draw_contour_orientations(img, contours):
         for i in range(n_points):
             brightness = i / (n_points - 1) * 255
             cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
+
+
+def draw_graph(img: cv2.typing.MatLike, graph: Graph):
+    for i in range(len(graph.adjacency)):
+        for edge in graph.adjacency[i]:
+            if edge.vertex > i or edge.vertex < 0:
+                cv2.line(img, graph.vertices[i].astype(np.int32), graph.vertices[edge.vertex].astype(np.int32),
+                         color=(0, 0, 0))
+
+
+def draw_path(img, graph, path, raw_source, free_source, raw_target, free_target):
+    vertices = [graph.vertices[v].astype(np.int32) for v in path]
+    cv2.polylines(img, [np.array(vertices)], isClosed=False, color=(64, 64, 192), thickness=3)
+
+    cv2.line(img, raw_source, free_source.astype(np.int32), color=(0, 0, 0), thickness=3)
+    cv2.circle(img, free_source.astype(np.int32), color=(64, 192, 64), radius=6, thickness=-1)
+    cv2.circle(img, raw_source, color=(0, 0, 0), radius=6, thickness=-1)
+
+    cv2.line(img, raw_target, free_target.astype(np.int32), color=(0, 0, 0), thickness=3)
+    cv2.circle(img, free_target.astype(np.int32), color=(64, 64, 192), radius=6, thickness=-1)
+    cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
 
 
 def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int) -> list[int]:
@@ -409,41 +430,20 @@ def main():
 
     graph = build_graph(flat_contours)
 
-    print(f'Number of static convex vertices: {len(graph.vertices) - 2}')
-    num_static_edges = sum(
-        [len([edge for edge in graph.adjacency[i] if edge.vertex > i]) for i in range(len(graph.adjacency))])
-    print(f'Number of static edges: {num_static_edges}')
-
-    # free_source = push_out(np.array(raw_source), contours, orientations, hierarchy)
     free_source = np.array(raw_source)
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
 
     while True:
-        # free_target = push_out(np.array(raw_target), contours, orientations, hierarchy)
         free_target = np.array(raw_target)
         update_graph(graph, flat_contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, free_space, 0.25, 0.0)
         cv2.drawContours(img, flat_contours, contourIdx=-1, color=(64, 64, 192))
-        for i in range(len(graph.adjacency)):
-            for edge in graph.adjacency[i]:
-                if edge.vertex > i or edge.vertex < 0:
-                    cv2.line(img, graph.vertices[i].astype(np.int32), graph.vertices[edge.vertex].astype(np.int32),
-                             color=(0, 0, 0))
-        for i in range(len(path) - 1):
-            cv2.line(img, graph.vertices[path[i]].astype(np.int32), graph.vertices[path[i + 1]].astype(np.int32),
-                     color=(64, 64, 192), thickness=3)
-
-        cv2.line(img, raw_source, free_source.astype(np.int32), color=(0, 0, 0), thickness=3)
-        cv2.circle(img, free_source.astype(np.int32), color=(64, 192, 64), radius=6, thickness=-1)
-        cv2.circle(img, raw_source, color=(0, 0, 0), radius=6, thickness=-1)
-
-        cv2.line(img, raw_target, free_target.astype(np.int32), color=(0, 0, 0), thickness=3)
-        cv2.circle(img, free_target.astype(np.int32), color=(64, 64, 192), radius=6, thickness=-1)
-        cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
+        draw_graph(img, graph)
+        draw_path(img, graph, path, raw_source, free_source, raw_target, free_target)
 
         # draw_contour_orientations(img, contours, orientations)
         cv2.namedWindow('main', cv2.WINDOW_NORMAL)
@@ -461,16 +461,16 @@ def mouse_callback(event, x, y, flags, param):
 
 
 def pathfinding_test():
-    graph = [[Edge(1, 7), Edge(2, 9), Edge(5, 14)],
-             [Edge(0, 7), Edge(2, 10), Edge(3, 15)],
-             [Edge(0, 9), Edge(1, 10), Edge(3, 11), Edge(5, 2)],
-             [Edge(1, 15), Edge(2, 11), Edge(4, 6)],
-             [Edge(3, 6), Edge(5, 9)],
-             [Edge(0, 14), Edge(2, 2), Edge(4, 9)]]
+    adjacency = [[Edge(1, 7), Edge(2, 9), Edge(5, 14)],
+                 [Edge(0, 7), Edge(2, 10), Edge(3, 15)],
+                 [Edge(0, 9), Edge(1, 10), Edge(3, 11), Edge(5, 2)],
+                 [Edge(1, 15), Edge(2, 11), Edge(4, 6)],
+                 [Edge(3, 6), Edge(5, 9)],
+                 [Edge(0, 14), Edge(2, 2), Edge(4, 9)]]
     source = 0
     target = 4
     # Correct path for the above: [0, 2, 5, 4]
-    path = dijkstra(graph, source, target)
+    path = dijkstra(adjacency, source, target)
     print(path)
 
 
