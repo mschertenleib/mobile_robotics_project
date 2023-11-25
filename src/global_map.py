@@ -60,7 +60,7 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
     return False
 
 
-def _extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
+def extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
     """
     Get a list of contour regions from the given obstacle_mask, using the given epsilon for polygon approximation.
     Each contour region is a list of contours, where the first one is the outline of a region of free space,
@@ -80,7 +80,7 @@ def _extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
 
     # Group contours following their hierarchy
     # NOTE: this assumes a parent appears before its children in the hierarchy
-    contour_regions = [[] for _ in range(len(approx_contours))]
+    regions = [[] for _ in range(len(approx_contours))]
     for i in range(len(approx_contours)):
         # Only keep contour approximations that have at least 3 vertices
         if len(approx_contours[i]) >= 3:
@@ -88,15 +88,15 @@ def _extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float):
             # If parent is -1, the contour is the top-level outline of its own region.
             # Else, it is the outline of a hole in its parent region.
             region = i if parent == -1 else parent
-            contour_regions[region].append(np.squeeze(approx_contours[i]))
+            regions[region].append(np.squeeze(approx_contours[i]))
 
     # Remove empty groups
-    contour_regions = [group for group in contour_regions if len(group) > 0]
+    regions = [group for group in regions if len(group) > 0]
 
-    return contour_regions
+    return regions
 
 
-def _extract_convex_vertices(contours):
+def extract_convex_vertices(contours):
     vertices = []
     to_prev = []
     to_next = []
@@ -111,7 +111,7 @@ def _extract_convex_vertices(contours):
     return vertices, to_prev, to_next
 
 
-def _extract_static_adjacency(contours, vertices, to_prev, to_next):
+def extract_static_adjacency(contours, vertices, to_prev, to_next):
     adjacency = [[] for _ in range(len(vertices))]
     for i in range(len(vertices)):
         for j in range(i + 1, len(vertices)):
@@ -143,7 +143,7 @@ def _extract_static_adjacency(contours, vertices, to_prev, to_next):
     return adjacency
 
 
-def _extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
+def extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
     edges = []
     for i in range(len(vertices)):
 
@@ -168,8 +168,8 @@ def _extract_dynamic_edges(contours, vertices, to_prev, to_next, point):
 
 
 def build_graph(contours):
-    vertices, to_prev, to_next = _extract_convex_vertices(contours)
-    adjacency = _extract_static_adjacency(contours, vertices, to_prev, to_next)
+    vertices, to_prev, to_next = extract_convex_vertices(contours)
+    adjacency = extract_static_adjacency(contours, vertices, to_prev, to_next)
     # Reserve source and target vertices
     vertices += [[], []]
     adjacency += [[], []]
@@ -198,10 +198,10 @@ def update_graph(graph, contours, source, free_source, target, free_target):
     graph.adjacency[Graph.TARGET] = []
 
     # Extract new dynamic edges
-    graph.adjacency[Graph.SOURCE] = _extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
-                                                           free_source)
-    graph.adjacency[Graph.TARGET] = _extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
-                                                           free_target)
+    graph.adjacency[Graph.SOURCE] = extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
+                                                          free_source)
+    graph.adjacency[Graph.TARGET] = extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
+                                                          free_target)
     for edge in graph.adjacency[Graph.SOURCE]:
         graph.adjacency[edge.vertex].append(Edge(vertex=Graph.SOURCE, length=edge.length))
     for edge in graph.adjacency[Graph.TARGET]:
@@ -322,14 +322,71 @@ def project(pt, contour):
     return closest_point
 
 
-def push_out(pt: np.ndarray, contours, orientations, hierarchy) -> np.ndarray:
-    for i in range(len(contours)):
-        # FIXME(incomplete): we are skipping the top-level contour in the tree
-        if hierarchy[0][i][3] < 0:
-            continue
-        polygon_test = cv2.pointPolygonTest(contours[i], pt.astype(float), measureDist=False)
-        if (orientations[i] < 0 and polygon_test > 0) or (orientations[i] > 0 and polygon_test < 0):
-            return project(pt, contours[i])
+def is_in_region(point: cv2.typing.Point2f, region_contours: list[cv2.typing.MatLike]):
+    """
+    Returns True if the point is within the free space of the given region
+    """
+
+    test = cv2.pointPolygonTest(region_contours[0], point, measureDist=False)
+    if test < 0:
+        return False
+
+    for contour in region_contours[1:]:
+        test = cv2.pointPolygonTest(contour, point, measureDist=False)
+        if test > 0:
+            return False
+
+    return True
+
+
+def distance_to_contours(point: cv2.typing.Point2f, region_contours: list[cv2.typing.MatLike]):
+    """
+    Returns the signed distance from the point to the region contours.
+    Distance is positive if the point is within the free space of the region, else negative.
+    """
+
+    distances = [0.0] * len(region_contours)
+    distances[0] = cv2.pointPolygonTest(region_contours[0], point, measureDist=True)
+    if distances[0] < 0:  # The point is outside the region
+        return distances[0]
+
+    for i in range(1, len(region_contours)):
+        distances[i] = cv2.pointPolygonTest(region_contours[i], point, measureDist=True)
+        if distances[i] > 0:  # The point is inside an inner obstacle
+            return -distances[i]
+        distances[i] = -distances[i]
+
+    return min(distances)
+
+
+def draw_distance_to_contours(img_width: int, img_height: int, regions: list[list[cv2.typing.MatLike]]):
+    dist = np.zeros((img_height, img_width), dtype=np.float32) - np.inf
+    for i in range(dist.shape[0]):
+        for j in range(dist.shape[1]):
+            for region_contours in regions:
+                dist[i, j] = max(dist[i, j], distance_to_contours((j, i), region_contours))
+
+    min_dist, max_dist, min_dist_pt, max_dist_pt = cv2.minMaxLoc(dist)
+    min_dist = abs(min_dist)
+    max_dist = abs(max_dist)
+
+    img = np.zeros((img_height, img_width, 3), dtype=np.uint8)
+    dist_mask = dist >= 0
+    img[dist_mask, 1] = dist[dist_mask] / max_dist * 255
+    img[~dist_mask, 2] = -dist[~dist_mask] / min_dist * 255
+
+    flattened_contours = [contour for region in regions for contour in region]
+    cv2.drawContours(img, flattened_contours, contourIdx=-1, color=(255, 255, 255))
+
+    return img
+
+
+def push_out(pt: np.ndarray, regions) -> np.ndarray:
+    for region_contours in regions:
+        for i in range(len(region_contours)):
+            polygon_test = cv2.pointPolygonTest(region_contours[i], pt.astype(float), measureDist=False)
+            if (orientations[i] < 0 and polygon_test > 0) or (orientations[i] > 0 and polygon_test < 0):
+                return project(pt, region_contours[i])
     return pt
 
 
@@ -343,37 +400,36 @@ def main():
     color_image = cv2.imread('../images/map_divided.png')
     obstacle_mask = get_obstacle_mask(color_image)
 
-    contour_regions = _extract_contours(obstacle_mask, approx_poly_epsilon)
+    regions = extract_contours(obstacle_mask, approx_poly_epsilon)
 
     # FIXME: we are flattening all regions
-    contour_regions = [contour for region in contour_regions for contour in region]
+    flat_contours = [contour for region in regions for contour in region]
 
     free_space = np.empty_like(color_image)
     free_space[:] = (64, 64, 192)
-    cv2.drawContours(free_space, contour_regions, contourIdx=-1, color=(255, 255, 255), thickness=-1)
+    cv2.drawContours(free_space, flat_contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
 
-    graph = build_graph(contour_regions)
+    graph = build_graph(flat_contours)
 
     print(f'Number of static convex vertices: {len(graph.vertices) - 2}')
     num_static_edges = sum(
         [len([edge for edge in graph.adjacency[i] if edge.vertex > i]) for i in range(len(graph.adjacency))])
     print(f'Number of static edges: {num_static_edges}')
 
-    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
-    cv2.setMouseCallback('main', mouse_callback)
-
     # free_source = push_out(np.array(raw_source), contours, orientations, hierarchy)
     free_source = np.array(raw_source)
+
+    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
 
     while True:
         # free_target = push_out(np.array(raw_target), contours, orientations, hierarchy)
         free_target = np.array(raw_target)
-        update_graph(graph, contour_regions, np.array(raw_source), free_source, np.array(raw_target), free_target)
+        update_graph(graph, flat_contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, free_space, 0.25, 0.0)
-        cv2.drawContours(img, contour_regions, contourIdx=-1, color=(64, 64, 192))
+        cv2.drawContours(img, flat_contours, contourIdx=-1, color=(64, 64, 192))
         for i in range(len(graph.adjacency)):
             for edge in graph.adjacency[i]:
                 if edge.vertex > i or edge.vertex < 0:
@@ -392,6 +448,8 @@ def main():
         cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
 
         # draw_contour_orientations(img, contours, orientations)
+        cv2.namedWindow('main', cv2.WINDOW_NORMAL)
+        cv2.setMouseCallback('main', mouse_callback)
         cv2.imshow('main', normalize(img))
         if cv2.waitKey(1) == 27:
             break
@@ -418,14 +476,21 @@ def pathfinding_test():
     print(path)
 
 
-if __name__ == '__main__':
-    main()
-    # pathfinding_test()
+def contour_distance_test():
+    approx_poly_epsilon = 2
+    color_image = cv2.imread('../images/map_divided.png')
+    obstacle_mask = get_obstacle_mask(color_image)
+    regions = extract_contours(obstacle_mask, approx_poly_epsilon)
+    img = draw_distance_to_contours(color_image.shape[1], color_image.shape[0], regions)
 
-    """
-    a1 = np.array([3.7, -1.9])
-    a2 = np.array([10.67, -5.09])
-    b1 = np.array([3.7, -1.9])
-    b2 = np.array([3.14, 7.5])
-    print(intersect_segments_closed(a1, a2, b1, b2))
-    """
+    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('main', img.shape[1], img.shape[0])
+    cv2.imshow('main', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    # main()
+    # pathfinding_test()
+    contour_distance_test()
