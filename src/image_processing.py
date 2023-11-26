@@ -38,6 +38,22 @@ def get_image_to_world(width_px, height_px, width_mm, height_mm):
     return cv2.getAffineTransform(src, dst)
 
 
+def get_perspective_transform(map_vertices: np.ndarray, dst_width, dst_height):
+    pts_src = np.float32(map_vertices)
+    sorted_by_y = np.argsort(pts_src[:, 1])
+    top_points = pts_src[sorted_by_y[:2]]
+    top_sorted_by_x = np.argsort(top_points[:, 0])
+    top_left = top_points[top_sorted_by_x[0]]
+    top_right = top_points[top_sorted_by_x[1]]
+    bottom_points = pts_src[sorted_by_y[2:]]
+    bottom_sorted_by_x = np.argsort(bottom_points[:, 0])
+    bottom_left = bottom_points[bottom_sorted_by_x[0]]
+    bottom_right = bottom_points[bottom_sorted_by_x[1]]
+    pts_src = np.float32([top_left, top_right, bottom_right, bottom_left])
+    pts_dst = np.float32([[0, 0], [dst_width, 0], [dst_width, dst_height], [0, dst_height]])
+    return cv2.getPerspectiveTransform(pts_src, pts_dst)
+
+
 def correct_perspective():
     img = cv2.imread('../images/perspective_box.jpg')
     assert img is not None
