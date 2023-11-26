@@ -1,10 +1,10 @@
 from image_processing import *
 
-mouse_x, mouse_y = 0, 0
+g_mouse_x, g_mouse_y = 0, 0
 
 
 def mouse_callback(event, x, y, flags, param):
-    global mouse_x, mouse_y
+    global g_mouse_x, g_mouse_y
     if event == cv2.EVENT_MOUSEMOVE:
         mouse_x, mouse_y = x, y
 
@@ -20,7 +20,7 @@ def main():
         img = cv2.GaussianBlur(frame, (15, 15), 0)
         # img = cv2.fastNlMeansDenoisingColored(frame, None, 10, 10, 7, 21)
 
-        global mouse_x, mouse_y
+        global g_mouse_x, g_mouse_y
         bgr = img[mouse_y, mouse_x]
         hsv = cv2.cvtColor(np.array([[bgr]]), cv2.COLOR_BGR2HSV).flatten()
         print(f'XY = ({mouse_x}, {mouse_y}), RGB = {bgr[::-1]}, HSV = {hsv}')

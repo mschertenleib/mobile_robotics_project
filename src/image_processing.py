@@ -116,38 +116,6 @@ def get_obstacle_mask(color_image):
     return img
 
 
-mouse_x, mouse_y = 0, 0
-
-
-def mouse_callback(event, x, y, flags, param):
-    global mouse_x, mouse_y
-    if event == cv2.EVENT_MBUTTONDOWN:
-        mouse_x, mouse_y = x, y
-
-
-def floodfill_background():
-    img = cv2.imread('../images/map.png')
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('main', img.shape[1], img.shape[0])
-    cv2.setMouseCallback('main', mouse_callback)
-    cv2.imshow('main', normalize(img))
-    cv2.waitKey(0)
-
-    # Not sure this would actually work well...
-    global mouse_x, mouse_y
-    seed_point = (mouse_x, mouse_y)
-    _, img, mask, _ = cv2.floodFill(img, mask=np.array([], dtype=np.uint8), seedPoint=seed_point, newVal=0, loDiff=2,
-                                    upDiff=2, flags=cv2.FLOODFILL_MASK_ONLY)
-    # TODO: actually use the mask here
-    # _, img = cv2.threshold(img, thresh=1, maxval=1, type=cv2.THRESH_BINARY)
-    image_info(mask)
-    cv2.imshow('main', np.where(mask[1:-1, 1:-1], img, 0))
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
 def test_transforms():
     # Transformations we need:
     # - original image -> perspective corrected
@@ -214,7 +182,36 @@ def test_obstacle_mask():
     cv2.destroyAllWindows()
 
 
-def detect_robot():
+def detect_robot(img: cv2.typing.MatLike):
+    filtered_img = cv2.bilateralFilter(img, 15, 150, 150)
+
+    hsv = cv2.cvtColor(filtered_img, cv2.COLOR_BGR2HSV)
+    lower_green = np.array([60, 50, 50])
+    upper_green = np.array([80, 255, 255])
+    mask = cv2.inRange(hsv, lower_green, upper_green)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) != 3:
+        return None
+
+    vertices = np.empty((3, 2), dtype=np.int32)
+    for i in range(len(contours)):
+        moments = cv2.moments(contours[i])
+        if moments["m00"] == 0:
+            return None
+
+        px = np.int32(moments["m10"] / moments["m00"])
+        py = np.int32(moments["m01"] / moments["m00"])
+        vertices[i] = np.array([px, py])
+
+    return vertices
+
+
+def test_detect_robot():
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
@@ -225,33 +222,15 @@ def detect_robot():
             break
 
         img = frame.copy()
-        img = cv2.bilateralFilter(img, 15, 150, 150)
-
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        lower_green = np.array([60, 50, 50])
-        upper_green = np.array([80, 255, 255])
-        mask = cv2.inRange(hsv, lower_green, upper_green)
-
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        vertices = []
-        for contour in contours:
-            moments = cv2.moments(contour)
-            if moments["m00"] != 0:
-                px = int(moments["m10"] / moments["m00"])
-                py = int(moments["m01"] / moments["m00"])
-                vertices.append(np.array([px, py]))
-        cv2.drawContours(img, contours, contourIdx=-1, color=(255, 255, 255))
-        if len(vertices) == 3:
+        vertices = detect_robot(img)
+        # cv2.drawContours(img, contours, contourIdx=-1, color=(255, 255, 255))
+        if vertices is not None:
             cv2.polylines(img, [np.array(vertices)], isClosed=True, color=(0, 255, 0))
             for vertex in vertices:
                 cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
 
         cv2.imshow('img', img)
-        cv2.imshow('mask', mask)
+        # cv2.imshow('mask', mask)
 
         if cv2.waitKey(1) & 0xff == 27:
             break
@@ -260,7 +239,7 @@ def detect_robot():
     cv2.destroyAllWindows()
 
 
-def detect_map():
+def test_detect_map():
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     while cap.isOpened():
         ret, frame = cap.read()
@@ -296,10 +275,9 @@ def detect_map():
 
 
 if __name__ == '__main__':
-    # floodfill_background()
     # correct_perspective()
     # reconstruct_thymio()
     # test_transforms()
     # test_obstacle_mask()
-    detect_map()
-    # detect_robot()
+    # test_detect_map()
+    test_detect_robot()
