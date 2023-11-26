@@ -26,14 +26,26 @@ def main():
             break
 
         img = frame.copy()
-        vertices = detect_robot(img)
-        if vertices is None:
-            cv2.putText(img, 'Robot not detected', org=(10, 40), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
+        text_y = 25
+
+        robot_vertices = detect_robot(frame)
+        if robot_vertices is None:
+            cv2.putText(img, 'Robot not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
+                        color=(64, 64, 192), lineType=cv2.LINE_AA)
+            text_y += 20
+        else:
+            cv2.polylines(img, [np.array(robot_vertices)], isClosed=True, color=(0, 255, 0))
+            for vertex in robot_vertices:
+                cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
+
+        map_vertices = detect_map(frame)
+        if map_vertices is None:
+            cv2.putText(img, 'Map not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
                         color=(64, 64, 192), lineType=cv2.LINE_AA)
         else:
-            cv2.polylines(img, [np.array(vertices)], isClosed=True, color=(0, 255, 0))
-            for vertex in vertices:
-                cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
+            cv2.drawContours(img, [map_vertices], contourIdx=-1, color=(0, 255, 0))
+            for vertex in map_vertices:
+                cv2.drawMarker(img, position=vertex[0], color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
 
         cv2.imshow('img', img)
         cv2.setMouseCallback('img', mouse_callback)

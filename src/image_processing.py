@@ -211,73 +211,29 @@ def detect_robot(img: cv2.typing.MatLike):
     return vertices
 
 
-def test_detect_robot():
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            print('Cannot read frame')
-            break
+def detect_map(img: cv2.typing.MatLike):
+    img = cv2.bilateralFilter(img, 15, 150, 150)
 
-        img = frame.copy()
-        vertices = detect_robot(img)
-        # cv2.drawContours(img, contours, contourIdx=-1, color=(255, 255, 255))
-        if vertices is not None:
-            cv2.polylines(img, [np.array(vertices)], isClosed=True, color=(0, 255, 0))
-            for vertex in vertices:
-                cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
+    mask = cv2.inRange(img, np.array([200, 200, 200]), np.array([255, 255, 255]))
 
-        cv2.imshow('img', img)
-        # cv2.imshow('mask', mask)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
 
-        if cv2.waitKey(1) & 0xff == 27:
-            break
+    contours, _ = cv2.findContours(mask, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) != 1:
+        return None
 
-    cap.release()
-    cv2.destroyAllWindows()
+    length = cv2.arcLength(contours[0], closed=True)
+    approx = cv2.approxPolyDP(contours[0], epsilon=0.1 * length, closed=True)
+    if approx.shape[0] != 4:
+        return None
 
-
-def test_detect_map():
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            print('Cannot read frame')
-            break
-
-        img = frame.copy()
-        img = cv2.bilateralFilter(img, 15, 150, 150)
-
-        mask = cv2.inRange(img, np.array([200, 200, 200]), np.array([255, 255, 255]))
-
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
-
-        contours, _ = cv2.findContours(mask, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
-        if len(contours) == 1:
-            length = cv2.arcLength(contours[0], closed=True)
-            approx = cv2.approxPolyDP(contours[0], epsilon=0.1 * length, closed=True)
-            if approx.shape[0] == 4:
-                cv2.drawContours(img, [approx], contourIdx=-1, color=(0, 255, 0))
-                for vertex in approx:
-                    cv2.drawMarker(img, position=vertex[0], color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
-
-        cv2.imshow('img', img)
-        cv2.imshow('main', mask)
-        if cv2.waitKey(1) & 0xff == 27:
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+    return approx
 
 
 if __name__ == '__main__':
     # correct_perspective()
     # reconstruct_thymio()
     # test_transforms()
-    # test_obstacle_mask()
-    # test_detect_map()
-    test_detect_robot()
+    test_obstacle_mask()
