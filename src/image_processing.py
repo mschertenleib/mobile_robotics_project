@@ -198,10 +198,7 @@ def test_obstacle_mask():
     cv2.destroyAllWindows()
 
 
-def detect_robot(img: cv2.typing.MatLike):
-    filtered_img = cv2.bilateralFilter(img, 15, 150, 150)
-
-    hsv = cv2.cvtColor(filtered_img, cv2.COLOR_BGR2HSV)
+def detect_robot(hsv: cv2.typing.MatLike):
     lower_green = np.array([55, 50, 50])
     upper_green = np.array([75, 255, 255])
     mask = cv2.inRange(hsv, lower_green, upper_green)
@@ -227,10 +224,32 @@ def detect_robot(img: cv2.typing.MatLike):
     return vertices
 
 
-def detect_map(img: cv2.typing.MatLike):
-    filtered_img = cv2.bilateralFilter(img, 15, 150, 150)
+def detect_target(hsv: cv2.typing.MatLike):
+    lower_pink = np.array([165, 50, 50])
+    upper_pink = np.array([175, 255, 255])
+    mask = cv2.inRange(hsv, lower_pink, upper_pink)
 
-    hsv = cv2.cvtColor(filtered_img, cv2.COLOR_BGR2HSV)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    image_info(mask)
+    cv2.imshow('target_mask', mask)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) != 1:
+        return None
+
+    moments = cv2.moments(contours[0])
+    if moments["m00"] == 0:
+        return None
+
+    px = np.int32(moments["m10"] / moments["m00"])
+    py = np.int32(moments["m01"] / moments["m00"])
+    return np.array([px, py])
+
+
+def detect_map(hsv: cv2.typing.MatLike):
     lower_blue = np.array([100, 100, 100])
     upper_blue = np.array([115, 200, 200])
     mask = cv2.inRange(hsv, lower_blue, upper_blue)
