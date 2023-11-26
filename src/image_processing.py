@@ -202,8 +202,8 @@ def detect_robot(img: cv2.typing.MatLike):
     filtered_img = cv2.bilateralFilter(img, 15, 150, 150)
 
     hsv = cv2.cvtColor(filtered_img, cv2.COLOR_BGR2HSV)
-    lower_green = np.array([60, 50, 50])
-    upper_green = np.array([80, 255, 255])
+    lower_green = np.array([55, 50, 50])
+    upper_green = np.array([75, 255, 255])
     mask = cv2.inRange(hsv, lower_green, upper_green)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -214,7 +214,7 @@ def detect_robot(img: cv2.typing.MatLike):
     if len(contours) != 3:
         return None
 
-    vertices = np.empty((3, 2), dtype=np.int32)
+    vertices = np.empty((len(contours), 2), dtype=np.int32)
     for i in range(len(contours)):
         moments = cv2.moments(contours[i])
         if moments["m00"] == 0:
@@ -228,28 +228,37 @@ def detect_robot(img: cv2.typing.MatLike):
 
 
 def detect_map(img: cv2.typing.MatLike):
-    img = cv2.bilateralFilter(img, 15, 150, 150)
+    filtered_img = cv2.bilateralFilter(img, 15, 150, 150)
 
-    mask = cv2.inRange(img, np.array([200, 200, 200]), np.array([255, 255, 255]))
+    hsv = cv2.cvtColor(filtered_img, cv2.COLOR_BGR2HSV)
+    lower_blue = np.array([100, 100, 100])
+    upper_blue = np.array([115, 200, 200])
+    mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-    contours, _ = cv2.findContours(mask, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
-    if len(contours) != 1:
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) != 4:
         return None
 
-    length = cv2.arcLength(contours[0], closed=True)
-    approx = cv2.approxPolyDP(contours[0], epsilon=0.1 * length, closed=True)
-    if approx.shape[0] != 4:
-        return None
+    vertices = np.empty((len(contours), 2), dtype=np.int32)
+    for i in range(len(contours)):
+        moments = cv2.moments(contours[i])
+        if moments["m00"] == 0:
+            return None
 
-    return approx
+        px = np.int32(moments["m10"] / moments["m00"])
+        py = np.int32(moments["m01"] / moments["m00"])
+        vertices[i] = np.array([px, py])
+
+    return vertices
 
 
 if __name__ == '__main__':
     # correct_perspective()
     # reconstruct_thymio()
     # test_transforms()
-    test_obstacle_mask()
+    # test_obstacle_mask()
+    pass

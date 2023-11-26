@@ -63,14 +63,13 @@ def main():
             cv2.putText(img, 'Map not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
                         color=(64, 64, 192), lineType=cv2.LINE_AA)
         else:
-            cv2.drawContours(img, [map_vertices], contourIdx=-1, color=(0, 255, 0))
             for vertex in map_vertices:
-                cv2.drawMarker(img, position=vertex[0], color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
+                cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
 
         if map_vertices is not None:
             dst_width = 420
             dst_height = 594
-            matrix = get_perspective_transform(map_vertices.squeeze(), dst_width, dst_height)
+            matrix = get_perspective_transform(map_vertices, dst_width, dst_height)
             warped = cv2.warpPerspective(frame, matrix, (dst_width, dst_height))
             cv2.imshow('warped', warped)
 
