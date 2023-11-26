@@ -421,14 +421,15 @@ def main():
 
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
 
-    # FIXME: we are flattening all regions
-    flat_contours = [contour for region in regions for contour in region]
+    all_contours = [contour for region in regions for contour in region]
 
     free_space = np.empty_like(color_image)
     free_space[:] = (64, 64, 192)
-    cv2.drawContours(free_space, flat_contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
+    cv2.drawContours(free_space, all_contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
 
-    graph = build_graph(flat_contours)
+    # TODO: take the regions into account when building the graph (for performance), but it is probably better
+    #  to make only one Graph object
+    graph = build_graph(all_contours)
 
     free_source = np.array(raw_source)
 
@@ -437,11 +438,13 @@ def main():
 
     while True:
         free_target = np.array(raw_target)
-        update_graph(graph, flat_contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
+        # TODO: take the regions into account when building the graph (for performance), but it is probably better
+        #  to make only one Graph object
+        update_graph(graph, all_contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, free_space, 0.25, 0.0)
-        cv2.drawContours(img, flat_contours, contourIdx=-1, color=(64, 64, 192))
+        cv2.drawContours(img, all_contours, contourIdx=-1, color=(64, 64, 192))
         draw_graph(img, graph)
         draw_path(img, graph, path, raw_source, free_source, raw_target, free_target)
 
