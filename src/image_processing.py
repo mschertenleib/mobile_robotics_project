@@ -269,13 +269,25 @@ def detect_map():
             break
 
         img = frame.copy()
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, img = cv2.threshold(img, 200, 1, cv2.THRESH_BINARY)
+        img = cv2.bilateralFilter(img, 15, 150, 150)
+
+        mask = cv2.inRange(img, np.array([200, 200, 200]), np.array([255, 255, 255]))
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        img = cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
 
-        cv2.imshow('img', img * 255)
+        contours, _ = cv2.findContours(mask, mode=cv2.RETR_EXTERNAL, method=cv2.CHAIN_APPROX_SIMPLE)
+        if len(contours) == 1:
+            length = cv2.arcLength(contours[0], closed=True)
+            approx = cv2.approxPolyDP(contours[0], epsilon=0.1 * length, closed=True)
+            if approx.shape[0] == 4:
+                cv2.drawContours(img, [approx], contourIdx=-1, color=(0, 255, 0))
+                for vertex in approx:
+                    cv2.drawMarker(img, position=vertex[0], color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
+
+        cv2.imshow('img', img)
+        cv2.imshow('main', mask)
         if cv2.waitKey(1) & 0xff == 27:
             break
 
