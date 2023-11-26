@@ -85,9 +85,9 @@ def reconstruct_thymio():
     # Y axis towards the front
     # theta from x to y
 
-    POINT_BACK = (0, -10)
-    POINT_FRONT_LEFT = (-30, 60)
-    POINT_FRONT_RIGHT = (30, 60)
+    POINT_BACK = (0, -16)
+    POINT_FRONT_LEFT = (-35, 56)
+    POINT_FRONT_RIGHT = (35, 56)
 
     img = np.zeros((400, 400, 3), dtype=np.uint8)
 
@@ -198,7 +198,7 @@ def test_obstacle_mask():
     cv2.destroyAllWindows()
 
 
-def detect_robot(hsv: cv2.typing.MatLike):
+def detect_robot_vertices(hsv: cv2.typing.MatLike):
     lower_green = np.array([55, 50, 50])
     upper_green = np.array([75, 255, 255])
     mask = cv2.inRange(hsv, lower_green, upper_green)
@@ -224,6 +224,17 @@ def detect_robot(hsv: cv2.typing.MatLike):
     return vertices
 
 
+def get_robot_position(robot_vertices: np.ndarray):
+    lengths = np.empty(3)
+    for i in range(len(robot_vertices)):
+        vertex_1 = robot_vertices[i]
+        vertex_2 = robot_vertices[(i + 1) % len(robot_vertices)]
+        lengths[i] = np.linalg.norm(vertex_2 - vertex_1)
+    print(lengths)
+
+    return 0.0, 0.0, 0.0
+
+
 def detect_target(hsv: cv2.typing.MatLike):
     lower_pink = np.array([165, 50, 50])
     upper_pink = np.array([175, 255, 255])
@@ -232,9 +243,6 @@ def detect_target(hsv: cv2.typing.MatLike):
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-    image_info(mask)
-    cv2.imshow('target_mask', mask)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if len(contours) != 1:
@@ -249,7 +257,7 @@ def detect_target(hsv: cv2.typing.MatLike):
     return np.array([px, py])
 
 
-def detect_map(hsv: cv2.typing.MatLike):
+def detect_map_corners(hsv: cv2.typing.MatLike):
     lower_blue = np.array([100, 100, 100])
     upper_blue = np.array([115, 200, 200])
     mask = cv2.inRange(hsv, lower_blue, upper_blue)
@@ -277,7 +285,7 @@ def detect_map(hsv: cv2.typing.MatLike):
 
 if __name__ == '__main__':
     # correct_perspective()
-    # reconstruct_thymio()
+    reconstruct_thymio()
     # test_transforms()
     # test_obstacle_mask()
     pass

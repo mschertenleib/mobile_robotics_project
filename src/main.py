@@ -52,7 +52,7 @@ def main():
         hsv = cv2.cvtColor(filtered_frame, cv2.COLOR_BGR2HSV)
 
         # TODO: detect robot and target in perspective corrected image space
-        robot_vertices = detect_robot(hsv)
+        robot_vertices = detect_robot_vertices(hsv)
         if robot_vertices is None:
             cv2.putText(img, 'Robot not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
                         color=(64, 64, 192), lineType=cv2.LINE_AA)
@@ -61,6 +61,8 @@ def main():
             cv2.polylines(img, [np.array(robot_vertices)], isClosed=True, color=(0, 255, 0))
             for vertex in robot_vertices:
                 cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
+            x, y, theta = get_robot_position(robot_vertices)
+            print(x, y, theta)
 
         target = detect_target(hsv)
         if target is None:
@@ -68,9 +70,9 @@ def main():
                         color=(64, 64, 192), lineType=cv2.LINE_AA)
             text_y += 20
         else:
-            cv2.drawMarker(img, position=target, color=(255, 255, 255), markerType=cv2.MARKER_STAR)
+            cv2.drawMarker(img, position=target, color=(255, 255, 255), markerType=cv2.MARKER_CROSS)
 
-        map_vertices = detect_map(hsv)
+        map_vertices = detect_map_corners(hsv)
         if map_vertices is None:
             cv2.putText(img, 'Map not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
                         color=(64, 64, 192), lineType=cv2.LINE_AA)
