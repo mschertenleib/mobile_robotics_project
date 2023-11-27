@@ -174,30 +174,6 @@ def draw_contour_orientations(img, contours, orientations):
             cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
-def test_obstacle_mask():
-    approx_poly_epsilon = 2
-    color_image = cv2.imread('../images/map_divided.png')
-    obstacle_mask = get_obstacle_mask(color_image)
-
-    contours, hierarchy = cv2.findContours(obstacle_mask, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
-    contours = [cv2.approxPolyDP(contour, epsilon=approx_poly_epsilon, closed=True) for contour in contours]
-
-    # Discard ill-formed approximations that have less than 3 vertices
-    # FIXME: we should update the hierarchy accordingly !!!
-    contours = [np.squeeze(contour) for contour in contours if len(contour) > 2]
-
-    orientations = [np.sign(cv2.contourArea(contour, oriented=True)) for contour in contours]
-
-    img = color_image.copy()
-    draw_contour_orientations(img, contours, orientations)
-
-    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('main', img.shape[1], img.shape[0])
-    cv2.imshow('main', img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
 def detect_robot_vertices(hsv: cv2.typing.MatLike):
     lower_green = np.array([55, 50, 50])
     upper_green = np.array([75, 255, 255])
