@@ -1,5 +1,3 @@
-import cv2
-
 from robot import *
 
 
@@ -17,24 +15,24 @@ def normalize(img: np.ndarray):
 
 
 def transform_perspective(matrix, point):
-    transformed = matrix @ np.float32([point[0], point[1], 1])
+    transformed = matrix @ np.array([point[0], point[1], 1])
     return transformed[0:2] / transformed[2]
 
 
 def transform_affine(matrix, point):
-    transformed = matrix @ np.float32([point[0], point[1], 1])
+    transformed = matrix @ np.array([point[0], point[1], 1])
     return transformed
-
-
-def draw_thymio(img, position: np.ndarray, angle: float):
-    rot = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
-    points = position.astype(float) + (rot @ Thymio.outline.T).T
-    cv2.polylines(img, [points.astype(int)], isClosed=True, color=(255, 255, 255))
 
 
 def get_image_to_world(width_px, height_px, width_mm, height_mm):
     src = np.float32([[0, 0], [width_px, 0], [0, height_px]])
     dst = np.float32([[0, height_mm], [width_mm, height_mm], [0, 0]])
+    return cv2.getAffineTransform(src, dst)
+
+
+def get_world_to_image(width_mm, height_mm, width_px, height_px):
+    src = np.float32([[0, height_mm], [width_mm, height_mm], [0, 0]])
+    dst = np.float32([[0, 0], [width_px, 0], [0, height_px]])
     return cv2.getAffineTransform(src, dst)
 
 
@@ -81,29 +79,32 @@ def correct_perspective():
 
 
 def reconstruct_thymio():
-    # X axis towards the right
-    # Y axis towards the front
-    # theta from x to y
-
-    POINT_BACK = (0, -16)
-    POINT_FRONT_LEFT = (-35, 56)
-    POINT_FRONT_RIGHT = (35, 56)
-
     img = np.zeros((400, 400, 3), dtype=np.uint8)
+
+    width_mm = 500
+    height_mm = 500
+    image_to_world = get_image_to_world(img.shape[1], img.shape[0], width_mm, height_mm)
+    world_to_image = get_world_to_image(width_mm, height_mm, img.shape[1], img.shape[0])
 
     back = np.int32([200, 140])
     front_left = np.int32([180, 280])
     front_right = np.int32([300, 250])
     front_center = (front_left + front_right) // 2
+    direction = front_center - back
 
-    cv2.line(img, front_center, back, color=(255, 255, 255))
-    cv2.circle(img, center=back, radius=5, color=(255, 255, 255), thickness=-1)
-    cv2.circle(img, center=front_left, radius=5, color=(0, 0, 255), thickness=-1)
+    cv2.circle(img, center=back, radius=5, color=(0, 255, 0), thickness=-1)
+    cv2.circle(img, center=front_left, radius=5, color=(0, 255, 0), thickness=-1)
     cv2.circle(img, center=front_right, radius=5, color=(0, 255, 0), thickness=-1)
-    cv2.circle(img, center=front_center, radius=5, color=(255, 255, 255), thickness=-1)
 
-    dir = front_center - back
-    draw_thymio(img, back, np.arctan2(-dir[0], dir[1]))
+    thymio = Thymio(back[0], back[1], np.arctan2(direction[1], direction[0]))
+
+    robot_outline = thymio.get_outline()
+    robot_outline = np.array([robot_outline.T[0, :], robot_outline.T[1, :], np.ones(robot_outline.shape[0])])
+    robot_outline = (world_to_image @ robot_outline).T.astype(np.int32)
+    robot_pos = (world_to_image @ np.array([thymio.pos_x, thymio.pos_y, 1])).astype(np.int32)
+
+    cv2.polylines(img, [robot_outline], isClosed=True, color=(255, 255, 255), lineType=cv2.LINE_AA)
+    cv2.circle(img, center=robot_pos, radius=3, color=(255, 255, 255), thickness=-1, lineType=cv2.LINE_AA)
 
     cv2.imshow('main', img)
     cv2.waitKey(0)
@@ -200,7 +201,7 @@ def detect_robot_vertices(hsv: cv2.typing.MatLike):
     return vertices
 
 
-def get_robot_position(robot_vertices: np.ndarray):
+def get_robot_pose(robot_vertices: np.ndarray):
     lengths = np.empty(3)
     for i in range(len(robot_vertices)):
         vertex_1 = robot_vertices[i]

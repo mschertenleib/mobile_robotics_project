@@ -2,27 +2,29 @@ import numpy as np
 
 
 class Thymio:
+    # X axis towards the right
+    # Y axis towards the front
+    # theta from x to y
     # All distances are in mm, angles in radians
-    outline = np.array([[-55, -55],
-                        [55, -55],
-                        [55, 30],
-                        [47, 38],
-                        [25, 49],
-                        [0, 55],
-                        [-24, 50],
-                        [-46, 39],
-                        [-55, 30],
-                        [-55, -55]])
-    sensor_angles = np.radians(np.array([120, 105, 90, 75, 60, -90, -90]))
-    sensor_pos = np.array([[-46, 39],
-                           [-24, 50],
-                           [0, 55],
-                           [25, 49],
-                           [47, 38],
-                           [30, -55],
-                           [-30, -55]])
 
-    def __init__(self):
-        self.pos_x = 0
-        self.pos_y = 0
-        self.theta = 0
+    POINT_BACK = np.array([0, -16])
+    POINT_FRONT_LEFT = np.array([-35, 56])
+    POINT_FRONT_RIGHT = np.array([35, 56])
+    RADIUS = 80
+    _OUTLINE = np.array([[-56, -30],
+                         [56, -30],
+                         [56, 55],
+                         [34, 72],
+                         [0, 80],
+                         [-34, 72],
+                         [-56, 55]])
+
+    def __init__(self, pos_x: float = 0.0, pos_y: float = 0.0, theta: float = 0.0):
+        self.pos_x = pos_x
+        self.pos_y = pos_y
+        self.theta = theta
+
+    def get_outline(self):
+        rot = np.array([[np.cos(self.theta), -np.sin(self.theta)], [np.sin(self.theta), np.cos(self.theta)]])
+        pos = np.array([self.pos_x, self.pos_y])
+        return pos + (rot @ self._OUTLINE.T).T

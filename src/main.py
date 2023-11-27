@@ -61,7 +61,7 @@ def main():
             cv2.polylines(img, [np.array(robot_vertices)], isClosed=True, color=(0, 255, 0))
             for vertex in robot_vertices:
                 cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
-            x, y, theta = get_robot_position(robot_vertices)
+            x, y, theta = get_robot_pose(robot_vertices)
             print(x, y, theta)
 
         target = detect_target(hsv)
