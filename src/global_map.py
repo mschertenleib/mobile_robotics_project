@@ -391,11 +391,11 @@ def push_out(point: cv2.typing.Point2f, regions: list[list[cv2.typing.MatLike]])
 
         if contour_index != 0:
             # We are in a hole in this region
+            # FIXME: we might actually be in an inner region here !!
             return project(point, regions[i][contour_index])
 
         # We are outside of this region, record how far we are from it
         distances_to_outlines[i] = distance
-
     # If we got here, it means we are outside of all regions (i.e. in an obstacle separating two regions, or in the
     # outer border. We also know that all distances are negative
     closest_region = np.argmax(distances_to_outlines)
@@ -433,6 +433,7 @@ def main():
     while True:
         # FIXME: we do not detect intersection if source and target are on opposite vertices of the same contour
         free_target = push_out(np.float32(raw_target), regions)
+
         # TODO: take the regions into account when building the graph (for performance), but it is probably better
         #  to make only one Graph object
         update_graph(graph, all_contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
@@ -443,7 +444,14 @@ def main():
         draw_graph(img, graph)
         draw_path(img, graph, path, raw_source, free_source, raw_target, free_target)
 
-        # draw_contour_orientations(img, contours, orientations)
+        y = 70
+        for i in range(len(regions)):
+            # Well, distance_to_contours seems to be working
+            distance, contour_index = distance_to_contours(np.float32(raw_target), regions[i])
+            cv2.putText(img, f'{i} {distance:.2f} {contour_index}', org=(10, y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=1, color=(0, 0, 0), lineType=cv2.LINE_AA)
+            y += 40
+
         cv2.namedWindow('main', cv2.WINDOW_NORMAL)
         cv2.setMouseCallback('main', mouse_callback)
         cv2.imshow('main', normalize(img))
