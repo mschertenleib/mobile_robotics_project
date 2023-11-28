@@ -1,3 +1,5 @@
+import cv2
+
 from robot import *
 
 
@@ -201,15 +203,38 @@ def detect_robot_vertices(hsv: cv2.typing.MatLike):
     return vertices
 
 
-def get_robot_pose(robot_vertices: np.ndarray):
+def get_robot_pose(robot_vertices: np.ndarray, distance_center_back: float):
+    """
+    Compute the robot pose (position, direction) in image space from its three detected markers
+    """
+
     lengths = np.empty(3)
     for i in range(len(robot_vertices)):
         vertex_1 = robot_vertices[i]
         vertex_2 = robot_vertices[(i + 1) % len(robot_vertices)]
         lengths[i] = np.linalg.norm(vertex_2 - vertex_1)
-    print(lengths)
 
-    return 0.0, 0.0, 0.0
+    # The front edge is the smallest of the three
+    front_edge_index = np.argmin(lengths)
+
+    # For now assume the left vertex comes before the right vertex
+    left_index = front_edge_index
+    right_index = (front_edge_index + 1) % len(robot_vertices)
+    back_index = (front_edge_index + 2) % len(robot_vertices)
+    left_edge = robot_vertices[left_index] - robot_vertices[back_index]
+    right_edge = robot_vertices[right_index] - robot_vertices[back_index]
+    # Switch left and right if we realize we were wrong
+    if np.cross(left_edge, right_edge) < 0:
+        left_index, right_index = right_index, left_index
+
+    back = robot_vertices[back_index]
+    left = robot_vertices[left_index]
+    right = robot_vertices[right_index]
+    front_center = (left + right) / 2
+    direction = front_center - back
+    position = back + distance_center_back * direction / np.linalg.norm(direction)
+
+    return position, direction
 
 
 def detect_target(hsv: cv2.typing.MatLike):

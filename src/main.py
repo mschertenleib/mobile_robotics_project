@@ -1,19 +1,4 @@
-from image_processing import *
 from global_map import *
-
-g_mouse_x, g_mouse_y = 0, 0
-
-
-def mouse_callback(event, x, y, flags, param):
-    global g_mouse_x, g_mouse_y
-    if event == cv2.EVENT_MOUSEMOVE:
-        g_mouse_x, g_mouse_y = x, y
-
-
-def print_pixel(img, x, y):
-    bgr = img[y, x]
-    hsv = cv2.cvtColor(np.array([[bgr]]), code=cv2.COLOR_BGR2HSV).squeeze()
-    print(f'XY = ({x}, {y}), RGB = {bgr[::-1]}, HSV = {hsv}')
 
 
 def build_draw_graph(img):
@@ -39,62 +24,76 @@ def main():
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+    dst_width = 420
+    dst_height = 594
+    warped = np.zeros((dst_height, dst_width, 3), dtype=np.uint8)
+    warped_img = warped.copy()
+
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             print('Cannot read frame')
             break
 
-        img = frame.copy()
-        text_y = 25
-
         filtered_frame = cv2.bilateralFilter(frame, 15, 150, 150)
         hsv = cv2.cvtColor(filtered_frame, cv2.COLOR_BGR2HSV)
 
-        # TODO: detect robot and target in perspective corrected image space
-        robot_vertices = detect_robot_vertices(hsv)
-        if robot_vertices is None:
-            cv2.putText(img, 'Robot not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
-                        color=(64, 64, 192), lineType=cv2.LINE_AA)
+        text_y = 25
+        frame_img = frame.copy()
+        map_vertices = detect_map_corners(hsv)
+        if map_vertices is None:
+            cv2.putText(frame_img, 'Map not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=0.5, color=(64, 64, 192), lineType=cv2.LINE_AA)
             text_y += 20
         else:
-            cv2.polylines(img, [np.array(robot_vertices)], isClosed=True, color=(0, 255, 0))
+            cv2.putText(frame_img, 'Map detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=0.5, color=(64, 192, 64), lineType=cv2.LINE_AA)
+            text_y += 20
+            for vertex in map_vertices:
+                cv2.drawMarker(frame_img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS, thickness=2)
+
+            matrix = get_perspective_transform(map_vertices, dst_width, dst_height)
+            warped = cv2.warpPerspective(filtered_frame, matrix, (dst_width, dst_height))
+            warped_img = warped.copy()
+
+        cv2.imshow('frame_img', frame_img)
+
+        hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
+        robot_vertices = detect_robot_vertices(hsv)
+        text_y = 25
+        if robot_vertices is None:
+            cv2.putText(warped_img, 'Robot not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=0.5, color=(64, 64, 192), lineType=cv2.LINE_AA)
+            text_y += 20
+        else:
+            cv2.putText(warped_img, 'Robot detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=0.5, color=(64, 192, 64), lineType=cv2.LINE_AA)
+            text_y += 20
+            cv2.polylines(warped_img, [np.array(robot_vertices)], isClosed=True, color=(0, 255, 0), thickness=2)
             for vertex in robot_vertices:
-                cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
-            x, y, theta = get_robot_pose(robot_vertices)
-            print(x, y, theta)
+                cv2.drawMarker(warped_img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS, thickness=2)
+
+            distance_center_back = 10  # FIXME
+            position, direction = get_robot_pose(robot_vertices, distance_center_back)
+            print(position, direction)
 
         target = detect_target(hsv)
         if target is None:
-            cv2.putText(img, 'Target not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
-                        color=(64, 64, 192), lineType=cv2.LINE_AA)
+            cv2.putText(warped_img, 'Target not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=0.5, color=(64, 64, 192), lineType=cv2.LINE_AA)
             text_y += 20
         else:
-            cv2.drawMarker(img, position=target, color=(255, 255, 255), markerType=cv2.MARKER_CROSS)
+            cv2.putText(warped_img, 'Target detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=0.5, color=(64, 192, 64), lineType=cv2.LINE_AA)
+            text_y += 20
+            cv2.drawMarker(warped_img, position=target, color=(255, 255, 255), markerType=cv2.MARKER_CROSS, thickness=2)
 
-        map_vertices = detect_map_corners(hsv)
-        if map_vertices is None:
-            cv2.putText(img, 'Map not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
-                        color=(64, 64, 192), lineType=cv2.LINE_AA)
-        else:
-            for vertex in map_vertices:
-                cv2.drawMarker(img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS)
-
-        if map_vertices is not None:
-            dst_width = 420
-            dst_height = 594
-            matrix = get_perspective_transform(map_vertices, dst_width, dst_height)
-            warped = cv2.warpPerspective(frame, matrix, (dst_width, dst_height))
-            cv2.imshow('warped', warped)
-
-        cv2.imshow('img', img)
-        cv2.setMouseCallback('img', mouse_callback)
+        cv2.imshow('warped_img', warped_img)
 
         key = cv2.waitKey(1) & 0xff
         if key == 27:
             break
-        elif key == ord('p'):
-            print_pixel(frame, g_mouse_x, g_mouse_y)
         elif key == ord('m'):
             graph_img = build_draw_graph(warped)
             cv2.imshow('graph', graph_img)
