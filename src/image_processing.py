@@ -118,7 +118,7 @@ def get_obstacle_mask(color_image):
     Returns a binary obstacle mask of the given image, where 1 represents an obstacle. An obstacle border is added.
     """
 
-    threshold = 200
+    threshold = 150
     kernel_size = 50
     img = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
@@ -203,6 +203,8 @@ def detect_robot_vertices(hsv: cv2.typing.MatLike):
     return vertices
 
 
+# TODO: look at https://docs.opencv.org/4.x/d5/dae/tutorial_aruco_detection.html !!!
+#  That might be 10x more robust
 def get_robot_pose(robot_vertices: np.ndarray, distance_center_back: float):
     """
     Compute the robot pose (position, direction) in image space from its three detected markers

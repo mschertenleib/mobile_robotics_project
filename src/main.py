@@ -25,8 +25,8 @@ def main():
     # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-    dst_width = 420
-    dst_height = 594
+    dst_width = 594
+    dst_height = 841
     warped = np.zeros((dst_height, dst_width, 3), dtype=np.uint8)
     warped_img = warped.copy()
 
@@ -70,13 +70,15 @@ def main():
             cv2.putText(warped_img, 'Robot detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 192, 64), lineType=cv2.LINE_AA)
             text_y += 20
-            cv2.polylines(warped_img, [np.array(robot_vertices)], isClosed=True, color=(0, 255, 0), thickness=2)
             for vertex in robot_vertices:
                 cv2.drawMarker(warped_img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS, thickness=2)
 
             distance_center_back = 10  # FIXME
             position, direction = get_robot_pose(robot_vertices, distance_center_back)
-            print(position, direction)
+            cv2.circle(warped_img, center=position.astype(np.int32), radius=4, color=(0, 255, 0), thickness=-1,
+                       lineType=cv2.LINE_AA)
+            cv2.arrowedLine(warped_img, position.astype(np.int32), (position + direction + 10).astype(np.int32),
+                            color=(0, 255, 0), thickness=2, line_type=cv2.LINE_AA, tipLength=0.5)
 
         target = detect_target(hsv)
         if target is None:
