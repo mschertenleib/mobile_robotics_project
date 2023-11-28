@@ -21,20 +21,33 @@ def build_draw_graph(img):
 
 
 def main():
+    use_image = True
+    if use_image:
+        frame_from_file = cv2.imread('frame.png')
+
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
     dst_width = 594
-    dst_height = 841
+    dst_height = 420
     warped = np.zeros((dst_height, dst_width, 3), dtype=np.uint8)
     warped_img = warped.copy()
+
+    width_mm = 1189 - 2 * 25
+    height_mm = 841 - 2 * 25
+    image_to_world = get_image_to_world(dst_width, dst_height, width_mm, height_mm)
+    world_to_image = get_world_to_image(width_mm, height_mm, dst_width, dst_height)
+
+    thymio = Thymio()
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             print('Cannot read frame')
             break
+        if use_image:
+            frame = frame_from_file
 
         filtered_frame = cv2.bilateralFilter(frame, 15, 150, 150)
         hsv = cv2.cvtColor(filtered_frame, cv2.COLOR_BGR2HSV)
@@ -73,12 +86,21 @@ def main():
             for vertex in robot_vertices:
                 cv2.drawMarker(warped_img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS, thickness=2)
 
-            distance_center_back = 10  # FIXME
-            position, direction = get_robot_pose(robot_vertices, distance_center_back)
-            cv2.circle(warped_img, center=position.astype(np.int32), radius=4, color=(0, 255, 0), thickness=-1,
+            # FIXME: this is just a temporary hack
+            distance_center_back_px = np.abs(thymio.POINT_BACK[1]) / width_mm * dst_width
+            position_img, direction_img = get_robot_pose(robot_vertices, distance_center_back_px)
+            cv2.circle(warped_img, center=position_img.astype(np.int32), radius=4, color=(0, 255, 0), thickness=-1,
                        lineType=cv2.LINE_AA)
-            cv2.arrowedLine(warped_img, position.astype(np.int32), (position + direction + 10).astype(np.int32),
+            cv2.arrowedLine(warped_img, position_img.astype(np.int32),
+                            (position_img + direction_img * 40).astype(np.int32),
                             color=(0, 255, 0), thickness=2, line_type=cv2.LINE_AA, tipLength=0.5)
+            position_world = transform_affine(image_to_world, position_img)
+            thymio.pos_x = position_world[0]
+            thymio.pos_y = position_world[1]
+            thymio.theta = np.arctan2(-direction_img[0], -direction_img[1])
+            outline = thymio.get_outline().astype(np.int32)
+            outline = np.array([transform_affine(world_to_image, pt) for pt in outline], dtype=np.int32)
+            cv2.polylines(warped_img, [outline], isClosed=True, color=(0, 0, 255), thickness=2, lineType=cv2.LINE_AA)
 
         target = detect_target(hsv)
         if target is None:
@@ -99,6 +121,9 @@ def main():
         elif key == ord('m'):
             graph_img = build_draw_graph(warped)
             cv2.imshow('graph', graph_img)
+        elif key == ord('s'):
+            cv2.imwrite('frame.png', frame)
+            print('Saved frame as frame.png')
 
     cap.release()
     cv2.destroyAllWindows()

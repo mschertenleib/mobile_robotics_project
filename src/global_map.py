@@ -362,51 +362,45 @@ def is_in_region(point: cv2.typing.Point2f, region_contours: list[cv2.typing.Mat
 
 def distance_to_contours(point: cv2.typing.Point2f, region_contours: list[cv2.typing.MatLike]):
     """
-    Returns the signed distance from the point to the region contours.
+    Returns the signed distance from the point to the region contours, as well as the index of the closest contour
     Distance is positive if the point is within the free space of the region, else negative.
     """
 
-    distances = [0.0] * len(region_contours)
+    distances = np.empty(len(region_contours))
     distances[0] = cv2.pointPolygonTest(region_contours[0], point, measureDist=True)
     if distances[0] < 0:  # The point is outside the region
-        return distances[0]
+        return distances[0], 0
 
     for i in range(1, len(region_contours)):
         distances[i] = cv2.pointPolygonTest(region_contours[i], point, measureDist=True)
         if distances[i] > 0:  # The point is inside an inner obstacle
-            return -distances[i]
+            return -distances[i], i
         distances[i] = -distances[i]
 
-    return min(distances)
-
-
-def draw_distance_to_contours(img_width: int, img_height: int, regions: list[list[cv2.typing.MatLike]]):
-    dist = np.zeros((img_height, img_width), dtype=np.float32) - np.inf
-    for i in range(dist.shape[0]):
-        for j in range(dist.shape[1]):
-            for region_contours in regions:
-                dist[i, j] = max(dist[i, j], distance_to_contours((j, i), region_contours))
-
-    min_dist, max_dist, min_dist_pt, max_dist_pt = cv2.minMaxLoc(dist)
-    min_dist = abs(min_dist)
-    max_dist = abs(max_dist)
-
-    img = np.zeros((img_height, img_width, 3), dtype=np.uint8)
-    dist_mask = dist >= 0
-    img[dist_mask, 1] = dist[dist_mask] / max_dist * 255
-    img[~dist_mask, 2] = -dist[~dist_mask] / min_dist * 255
-
-    flattened_contours = [contour for region in regions for contour in region]
-    cv2.drawContours(img, flattened_contours, contourIdx=-1, color=(255, 255, 255))
-
-    return img
+    closest_contour = np.argmin(distances)
+    return distances[closest_contour], closest_contour
 
 
 def push_out(point: cv2.typing.Point2f, regions: list[list[cv2.typing.MatLike]]):
-    for region_contours in regions:
-        dist = distance_to_contours(point, region_contours)
-    assert False, 'push_out is broken for now'
-    return point
+    distances_to_outlines = np.empty(len(regions))
+    for i in range(len(regions)):
+        distance, contour_index = distance_to_contours(point, regions[i])
+        if distance >= 0:
+            # We are in free space in this region, nothing to do
+            return point
+
+        if contour_index != 0:
+            # We are in a hole in this region
+            return project(point, regions[i][contour_index])
+
+        # We are outside of this region, record how far we are from it
+        distances_to_outlines[i] = distance
+
+    # If we got here, it means we are outside of all regions (i.e. in an obstacle separating two regions, or in the
+    # outer border. We also know that all distances are negative
+    closest_region = np.argmax(distances_to_outlines)
+    # Project the point on the closest region's outline (i.e. contour 0)
+    return project(point, regions[closest_region][0])
 
 
 raw_target = (120, 730)
@@ -431,13 +425,14 @@ def main():
     #  to make only one Graph object
     graph = build_graph(all_contours)
 
-    free_source = np.array(raw_source)
+    free_source = push_out(np.float32(raw_source), regions)
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
 
     while True:
-        free_target = np.array(raw_target)
+        # FIXME: we do not detect intersection if source and target are on opposite vertices of the same contour
+        free_target = push_out(np.float32(raw_target), regions)
         # TODO: take the regions into account when building the graph (for performance), but it is probably better
         #  to make only one Graph object
         update_graph(graph, all_contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
@@ -477,21 +472,6 @@ def pathfinding_test():
     print(path)
 
 
-def contour_distance_test():
-    approx_poly_epsilon = 2
-    color_image = cv2.imread('../images/map_divided.png')
-    obstacle_mask = get_obstacle_mask(color_image)
-    regions = extract_contours(obstacle_mask, approx_poly_epsilon)
-    img = draw_distance_to_contours(color_image.shape[1], color_image.shape[0], regions)
-
-    cv2.namedWindow('main', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('main', img.shape[1], img.shape[0])
-    cv2.imshow('main', img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
 if __name__ == '__main__':
     main()
     # pathfinding_test()
-    # contour_distance_test()

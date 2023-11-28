@@ -118,7 +118,7 @@ def get_obstacle_mask(color_image):
     Returns a binary obstacle mask of the given image, where 1 represents an obstacle. An obstacle border is added.
     """
 
-    threshold = 150
+    threshold = 100
     kernel_size = 50
     img = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
@@ -234,7 +234,8 @@ def get_robot_pose(robot_vertices: np.ndarray, distance_center_back: float):
     right = robot_vertices[right_index]
     front_center = (left + right) / 2
     direction = front_center - back
-    position = back + distance_center_back * direction / np.linalg.norm(direction)
+    direction /= np.linalg.norm(direction)
+    position = back + distance_center_back * direction
 
     return position, direction
 
@@ -262,7 +263,7 @@ def detect_target(hsv: cv2.typing.MatLike):
 
 
 def detect_map_corners(hsv: cv2.typing.MatLike):
-    lower_blue = np.array([100, 100, 100])
+    lower_blue = np.array([100, 100, 50])
     upper_blue = np.array([115, 200, 200])
     mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
@@ -289,7 +290,7 @@ def detect_map_corners(hsv: cv2.typing.MatLike):
 
 if __name__ == '__main__':
     # correct_perspective()
-    reconstruct_thymio()
+    # reconstruct_thymio()
     # test_transforms()
     # test_obstacle_mask()
     pass
