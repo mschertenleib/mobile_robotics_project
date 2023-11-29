@@ -114,7 +114,7 @@ def extract_convex_vertices(contours: list[np.ndarray]):
     return vertices, to_prev, to_next
 
 
-def extract_static_adjacency(contours: list[np.ndarray], vertices, to_prev, to_next):
+def extract_static_adjacency(contours: list[np.ndarray], vertices, to_prev, to_next) -> list[list[Edge]]:
     adjacency = [[] for _ in range(len(vertices))]
     for i in range(len(vertices)):
         for j in range(i + 1, len(vertices)):
@@ -184,12 +184,16 @@ def build_graph(contours: list[np.ndarray]) -> Graph:
     return graph
 
 
-def update_graph(graph: Graph, contours, source, free_source, target, free_target):
+def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarray, target: np.ndarray) -> tuple[
+    np.ndarray, np.ndarray]:
     """
     Update the dynamic part of the graph. The considered vertices to be added in the graph are source and target,
     but the visibility edges are extracted from free_source and free_target, which should be outside any obstacle.
     This allows for source and target to be in obstacles, while behaving as if they were outside.
     """
+
+    free_source, source_region_index, source_contour_index, source_vertex_index = push_out(source, regions)
+    free_target, target_region_index, target_contour_index, target_vertex_index = push_out(target, regions)
 
     # Remove old dynamic edges
     # NOTE: this relies on dynamic edges being the last ones in the neighbor lists
@@ -199,6 +203,9 @@ def update_graph(graph: Graph, contours, source, free_source, target, free_targe
         del graph.adjacency[edge.vertex][-1]
     graph.adjacency[Graph.SOURCE] = []
     graph.adjacency[Graph.TARGET] = []
+
+    # FIXME
+    contours = [contour for region in regions for contour in region]
 
     # Extract new dynamic edges
     graph.adjacency[Graph.SOURCE] = extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
@@ -210,14 +217,57 @@ def update_graph(graph: Graph, contours, source, free_source, target, free_targe
     for edge in graph.adjacency[Graph.TARGET]:
         graph.adjacency[edge.vertex].append(Edge(vertex=Graph.TARGET, length=edge.length))
 
-    # Add the direct edge from source to target
-    if not segment_intersects_contours(free_source, free_target, contours):
+    # Add the direct edge from source to target, if valid
+    add_source_to_target = True
+    if source_vertex_index >= 0 and target_vertex_index >= 0:
+        # If both source and target have been projected to contour vertices, we must perform the same checks
+        # we would do in extract_static_adjacency(), or we might falsely include the edge if it goes through a contour
+        # without intersecting it.
+
+        source_contour = regions[source_region_index][source_contour_index]
+        target_contour = regions[target_region_index][target_contour_index]
+        source_vertex = source_contour[source_vertex_index]
+        source_to_prev = source_contour[source_vertex_index - 1 if source_vertex_index > 0 else len(
+            source_contour) - 1] - source_vertex
+        source_to_next = source_contour[(source_vertex_index + 1) % len(source_contour)] - source_vertex
+        target_vertex = target_contour[target_vertex_index]
+        target_to_prev = target_contour[target_vertex_index - 1 if target_vertex_index > 0 else len(
+            target_contour) - 1] - target_vertex
+        target_to_next = target_contour[(target_vertex_index + 1) % len(target_contour)] - target_vertex
+
+        # FIXME: this check is wrong, we just need to remove the edge if it "enters" in the shape, this here is more
+        #  restrictive
+        edge = target_vertex - source_vertex
+        sin_prev_source = np.cross(edge, source_to_prev)
+        sin_next_source = np.cross(edge, source_to_next)
+        if (sin_prev_source < 0 or sin_next_source < 0) and (sin_prev_source > 0 or sin_next_source > 0):
+            # FIXME: we need a way to short-circuit out of here
+            add_source_to_target = False
+        sin_prev_target = np.cross(edge, target_to_prev)
+        sin_next_target = np.cross(edge, target_to_next)
+        if (sin_prev_target < 0 or sin_next_target < 0) and (sin_prev_target > 0 or sin_next_target > 0):
+            add_source_to_target = False
+
+        is_target_prev_source = np.all(source_to_prev == edge)
+        is_target_next_source = np.all(source_to_next == edge)
+        is_source_prev_target = np.all(target_to_prev == -edge)
+        is_source_next_target = np.all(target_to_next == -edge)
+        are_vertices_connected = (is_target_prev_source or is_target_next_source) and (
+                is_source_prev_target or is_source_next_target)
+        if not are_vertices_connected and segment_intersects_contours(source_vertex, target_vertex, contours):
+            add_source_to_target = False
+
+    if segment_intersects_contours(free_source, free_target, contours):
+        add_source_to_target = False
+    if add_source_to_target:
         edge_length = np.linalg.norm(target - source)
         graph.adjacency[Graph.SOURCE].append(Edge(vertex=Graph.TARGET, length=edge_length))
         graph.adjacency[Graph.TARGET].append(Edge(vertex=Graph.SOURCE, length=edge_length))
 
     graph.vertices[Graph.SOURCE] = source
     graph.vertices[Graph.TARGET] = target
+
+    return free_source, free_target
 
 
 def draw_contour_orientations(img: np.ndarray, contours):
@@ -310,53 +360,7 @@ def reconstruct_path(prev, source: int, target: int) -> list[int]:
     return path
 
 
-def project(pt: np.ndarray, contour: np.ndarray) -> np.ndarray:
-    """
-    Returns the point on the contour that is the closest to pt
-    """
-
-    closest_point = np.empty(2)
-    min_distance = np.inf
-
-    for i in range(len(contour)):
-        pt1 = contour[i]
-        pt2 = contour[(i + 1) % len(contour)]
-        edge = pt2 - pt1
-        to_pt1 = pt1 - pt
-        to_pt2 = pt2 - pt
-        exterior_normal = np.float32([edge[1], -edge[0]])
-        n_cross_pt1 = np.cross(exterior_normal, to_pt1)
-        n_cross_pt2 = np.cross(exterior_normal, to_pt2)
-
-        # If this is true, the projection of the point on the segment lies somewhere between the two vertices
-        if (n_cross_pt1 < 0 < n_cross_pt2) or (n_cross_pt1 > 0 > n_cross_pt2):
-            exterior_normal /= np.linalg.norm(exterior_normal)
-            distance = np.dot(to_pt1, exterior_normal)
-            if np.abs(distance) < min_distance:
-                # If the distance is positive, the point is on the interior side of this part of the contour. If the
-                # distance is negative, the point is on the exterior side of this part of the contour, but it might
-                # be inside the contour somewhere else!
-                # Offset by a small distance towards the exterior normal, to avoid floating point issues (because we
-                # cannot get a resulting point exactly on the segment, without the offset the point might be
-                # accidentally still considered as inside the contour).
-                closest_point = pt + (distance + 1e-3) * exterior_normal
-                min_distance = np.abs(distance)
-
-        # Else the projection of the point on the segment lies on or beyond one of the vertices
-        else:
-            distance = np.linalg.norm(to_pt1)
-            if distance < min_distance:
-                closest_point = pt1
-                min_distance = distance
-            distance = np.linalg.norm(to_pt2)
-            if distance < min_distance:
-                closest_point = pt2
-                min_distance = distance
-
-    return closest_point
-
-
-def distance_to_contours(point: np.ndarray, region_contours: list[np.ndarray]):
+def distance_to_contours(point: np.ndarray, region_contours: list[np.ndarray]) -> tuple[float, int]:
     """
     Returns the signed distance from the point to the region contours, as well as the index of the closest contour
     Distance is positive if the point is within the free space of the region, else negative.
@@ -365,7 +369,7 @@ def distance_to_contours(point: np.ndarray, region_contours: list[np.ndarray]):
     distances = np.empty(len(region_contours))
     distances[0] = cv2.pointPolygonTest(region_contours[0], np.float32(point), measureDist=True)
     if distances[0] < 0:  # The point is outside the region
-        return distances[0], 0
+        return distances.item(0), 0
 
     for i in range(1, len(region_contours)):
         distances[i] = cv2.pointPolygonTest(region_contours[i], np.float32(point), measureDist=True)
@@ -374,14 +378,70 @@ def distance_to_contours(point: np.ndarray, region_contours: list[np.ndarray]):
         distances[i] = -distances[i]
 
     closest_contour = np.argmin(distances)
-    return distances[closest_contour], closest_contour
+    return distances.item(closest_contour), closest_contour
 
 
-def push_out(point: np.ndarray, regions: list[list[np.ndarray]]) -> np.ndarray:
+def project(pt: np.ndarray, contour: np.ndarray) -> tuple[np.ndarray, int]:
     """
-    If the point is inside an obstacle, returns the point on the boundary that is the closest.
-    If the point is in free space, returns is unchanged.
-    Note: the resulting point might be either float or int.
+    Projects pt on the contour, returning the point on the contour that is closest.
+    If the closest point is a vertex of the contour, also returns its index. Else, returns a negative value.
+    """
+
+    closest_point = np.empty(2)
+    vertex_index = -1
+    min_distance = np.inf
+
+    for i in range(len(contour)):
+        index_vertex_1 = i
+        index_vertex_2 = (i + 1) % len(contour)
+        vertex_1 = contour[index_vertex_1]
+        vertex_2 = contour[index_vertex_2]
+        edge = vertex_2 - vertex_1
+        to_vertex_1 = vertex_1 - pt
+        to_vertex_2 = vertex_2 - pt
+        exterior_normal = np.float32([edge[1], -edge[0]])
+        n_cross_v1 = np.cross(exterior_normal, to_vertex_1)
+        n_cross_v2 = np.cross(exterior_normal, to_vertex_2)
+
+        # If this is true, the projection of the point on the segment lies somewhere between the two vertices
+        if (n_cross_v1 < 0 < n_cross_v2) or (n_cross_v1 > 0 > n_cross_v2):
+            exterior_normal /= np.linalg.norm(exterior_normal)
+            distance = np.dot(to_vertex_1, exterior_normal)
+            if np.abs(distance) < min_distance:
+                # If the distance is positive, the point is on the interior side of this part of the contour. If the
+                # distance is negative, the point is on the exterior side of this part of the contour, but it might
+                # be inside the contour somewhere else!
+                # Offset by a small distance towards the exterior normal, to avoid floating point issues (because we
+                # cannot get a resulting point exactly on the segment, without the offset the point might be
+                # accidentally still considered as inside the contour).
+                closest_point = pt + (distance + 1e-3) * exterior_normal
+                vertex_index = -1
+                min_distance = np.abs(distance)
+
+        # Else the projection of the point on the segment lies on a vertex or beyond one of the vertices
+        else:
+            distance = np.linalg.norm(to_vertex_1)
+            if distance < min_distance:
+                closest_point = vertex_1
+                vertex_index = index_vertex_1
+                min_distance = distance
+            distance = np.linalg.norm(to_vertex_2)
+            if distance < min_distance:
+                closest_point = vertex_2
+                vertex_index = index_vertex_1
+                min_distance = distance
+
+    return closest_point, vertex_index
+
+
+def push_out(point: np.ndarray, regions: list[list[np.ndarray]]) -> tuple[np.ndarray, int, int, int]:
+    """
+    If the point is inside an obstacle, returns the projected point on the closest contour.
+    If the point is in free space, returns it unchanged.
+    Also returns: the region index, the index of the closest contour within that region, and the index of
+    the vertex the projection lies on, if it is the case.
+    If the point is in free space or its projection is between two vertices, that last index has a negative value.
+    Note: the resulting point might be either floating point or integer.
     """
 
     distances = np.empty(len(regions), dtype=np.float32)
@@ -390,17 +450,19 @@ def push_out(point: np.ndarray, regions: list[list[np.ndarray]]) -> np.ndarray:
         distance, contour_index = distance_to_contours(point, regions[i])
         if distance >= 0:
             # We are in free space in this region, nothing to do
-            return point
+            return point, i, contour_index, -1
 
-        # We are outside of this region or in a hole within it, record how far we are from it
+        # We are outside of this region or in a hole within it, so record how far we are from it, and which contour we
+        # are the closest from
         distances[i] = distance
         contour_indices[i] = contour_index
 
     # If we got here, it means we are in an obstacle. We also know that all distances are negative.
-    closest_region = np.argmax(distances)
-    # Project the point on the closest contour
-    contour_index = contour_indices[closest_region]
-    return project(point, regions[closest_region][contour_index])
+    closest_region: int = np.argmax(distances)
+    # Project the point on the recorded closest contour of the closest region
+    contour_index: int = contour_indices.item(closest_region)
+    projection, vertex_index = project(point, regions[closest_region][contour_index])
+    return projection, closest_region, contour_index, vertex_index
 
 
 raw_target = (120, 730)
@@ -429,14 +491,10 @@ def main():
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
 
     while True:
-        free_target = push_out(np.array(raw_target), regions)
-        free_source = push_out(np.array(raw_source), regions)
-
         # TODO: take the regions into account when building the graph (for performance), but it is probably better
         #  to make only one Graph object
 
-        # FIXME: we do not detect intersection if source and target are on opposite vertices of the same contour
-        update_graph(graph, all_contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
+        free_source, free_target = update_graph(graph, regions, np.array(raw_source), np.array(raw_target))
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, free_space, 0.25, 0.0)
