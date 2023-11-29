@@ -8,29 +8,29 @@ def image_info(img: np.ndarray):
         f'dtype: {img.dtype}, shape: {img.shape}, min: {img.min()}, max: {img.max()}')
 
 
-def transform_perspective(matrix, point):
+def transform_perspective(matrix: np.ndarray, point: np.ndarray) -> np.ndarray:
     transformed = matrix @ np.array([point[0], point[1], 1])
     return transformed[0:2] / transformed[2]
 
 
-def transform_affine(matrix, point):
+def transform_affine(matrix: np.ndarray, point: np.ndarray) -> np.ndarray:
     transformed = matrix @ np.array([point[0], point[1], 1])
     return transformed
 
 
-def get_image_to_world(width_px, height_px, width_mm, height_mm):
+def get_image_to_world(width_px: int, height_px: int, width_mm: float, height_mm: float) -> np.ndarray:
     src = np.float32([[0, 0], [width_px, 0], [0, height_px]])
     dst = np.float32([[0, height_mm], [width_mm, height_mm], [0, 0]])
     return cv2.getAffineTransform(src, dst)
 
 
-def get_world_to_image(width_mm, height_mm, width_px, height_px):
+def get_world_to_image(width_mm: float, height_mm: float, width_px: int, height_px: int) -> np.ndarray:
     src = np.float32([[0, height_mm], [width_mm, height_mm], [0, 0]])
     dst = np.float32([[0, 0], [width_px, 0], [0, height_px]])
     return cv2.getAffineTransform(src, dst)
 
 
-def get_perspective_transform(map_vertices: np.ndarray, dst_width, dst_height):
+def get_perspective_transform(map_vertices: np.ndarray, dst_width: int, dst_height: int) -> np.ndarray:
     pts_src = np.float32(map_vertices)
     sorted_by_y = np.argsort(pts_src[:, 1])
     top_points = pts_src[sorted_by_y[:2]]
@@ -105,7 +105,7 @@ def reconstruct_thymio():
     cv2.destroyAllWindows()
 
 
-def get_obstacle_mask(color_image):
+def get_obstacle_mask(color_image: np.ndarray) -> np.ndarray:
     """
     Returns a binary obstacle mask of the given image, where 1 represents an obstacle. An obstacle border is added.
     """
@@ -154,7 +154,7 @@ def test_transforms():
     print_transform(M, (width_px // 4, height_px // 4))
 
 
-def draw_contour_orientations(img, contours, orientations):
+def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray], orientations: np.ndarray):
     """
     Draw positive orientation as green, negative as red;
     first vertex is black, last is white

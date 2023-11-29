@@ -50,15 +50,16 @@ def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarra
     return np.any(colinear_mask & (mask_dir_same | mask_dir_opposite))
 
 
-def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> bool:
+def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, regions: list[list[np.ndarray]]) -> bool:
     """
     Checks for an intersection between the open segment ]pt1---pt2[ and all contours
     """
-    for contour in contours:
-        if segments_intersect(pt1, pt2, contour[:-1], contour[1:]):
-            return True
-        if segments_intersect(pt1, pt2, np.array([contour[-1]]), np.array([contour[0]])):
-            return True
+    for region in regions:
+        for contour in region:
+            if segments_intersect(pt1, pt2, contour[:-1], contour[1:]):
+                return True
+            if segments_intersect(pt1, pt2, np.array([contour[-1]]), np.array([contour[0]])):
+                return True
     return False
 
 
@@ -98,22 +99,25 @@ def extract_contours(obstacle_mask: np.ndarray, epsilon: float) -> list[list[np.
     return regions
 
 
-def extract_convex_vertices(contours: list[np.ndarray]):
+def extract_convex_vertices(regions: list[list[np.ndarray]]) -> tuple[
+    list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     vertices = []
     to_prev = []
     to_next = []
-    for contour in contours:
-        for i in range(len(contour)):
-            to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
-            to_next_i = contour[(i + 1) % len(contour)] - contour[i]
-            if np.cross(to_prev_i, to_next_i) <= 0:
-                vertices.append(contour[i])
-                to_prev.append(to_prev_i)
-                to_next.append(to_next_i)
+    for region in regions:
+        for contour in region:
+            for i in range(len(contour)):
+                to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
+                to_next_i = contour[(i + 1) % len(contour)] - contour[i]
+                if np.cross(to_prev_i, to_next_i) <= 0:
+                    vertices.append(contour[i])
+                    to_prev.append(to_prev_i)
+                    to_next.append(to_next_i)
     return vertices, to_prev, to_next
 
 
-def extract_static_adjacency(contours: list[np.ndarray], vertices, to_prev, to_next) -> list[list[Edge]]:
+def extract_static_adjacency(regions: list[list[np.ndarray]], vertices: list[np.ndarray], to_prev: list[np.ndarray],
+                             to_next: list[np.ndarray]) -> list[list[Edge]]:
     adjacency = [[] for _ in range(len(vertices))]
     for i in range(len(vertices)):
         for j in range(i + 1, len(vertices)):
@@ -135,7 +139,7 @@ def extract_static_adjacency(contours: list[np.ndarray], vertices, to_prev, to_n
             is_i_prev_j = np.all(to_prev[j] == -edge)
             is_i_next_j = np.all(to_next[j] == -edge)
             are_pts_connected = (is_j_prev_i or is_j_next_i) and (is_i_prev_j or is_i_next_j)
-            if not are_pts_connected and segment_intersects_contours(vertices[i], vertices[j], contours):
+            if not are_pts_connected and segment_intersects_contours(vertices[i], vertices[j], regions):
                 continue
 
             edge_length = np.linalg.norm(edge)
@@ -145,7 +149,8 @@ def extract_static_adjacency(contours: list[np.ndarray], vertices, to_prev, to_n
     return adjacency
 
 
-def extract_dynamic_edges(contours: list[np.ndarray], vertices, to_prev, to_next, point):
+def extract_dynamic_edges(regions: list[list[np.ndarray]], vertices: list[np.ndarray], to_prev: list[np.ndarray],
+                          to_next: list[np.ndarray], point: np.ndarray) -> list[Edge]:
     edges = []
     for i in range(len(vertices)):
 
@@ -169,9 +174,9 @@ def extract_dynamic_edges(contours: list[np.ndarray], vertices, to_prev, to_next
     return edges
 
 
-def build_graph(contours: list[np.ndarray]) -> Graph:
-    vertices, to_prev, to_next = extract_convex_vertices(contours)
-    adjacency = extract_static_adjacency(contours, vertices, to_prev, to_next)
+def build_graph(regions: list[list[np.ndarray]]) -> Graph:
+    vertices, to_prev, to_next = extract_convex_vertices(regions)
+    adjacency = extract_static_adjacency(regions, vertices, to_prev, to_next)
     # Reserve source and target vertices
     vertices += [[], []]
     adjacency += [[], []]
@@ -203,13 +208,10 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
     graph.adjacency[Graph.SOURCE] = []
     graph.adjacency[Graph.TARGET] = []
 
-    # FIXME
-    contours = [contour for region in regions for contour in region]
-
     # Extract new dynamic edges
-    graph.adjacency[Graph.SOURCE] = extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
+    graph.adjacency[Graph.SOURCE] = extract_dynamic_edges(regions, graph.vertices[:-2], graph.to_prev, graph.to_next,
                                                           free_source)
-    graph.adjacency[Graph.TARGET] = extract_dynamic_edges(contours, graph.vertices[:-2], graph.to_prev, graph.to_next,
+    graph.adjacency[Graph.TARGET] = extract_dynamic_edges(regions, graph.vertices[:-2], graph.to_prev, graph.to_next,
                                                           free_target)
     for edge in graph.adjacency[Graph.SOURCE]:
         graph.adjacency[edge.vertex].append(Edge(vertex=Graph.SOURCE, length=edge.length))
@@ -237,12 +239,12 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
         edge = target_vertex - source_vertex
         sin_prev_target = np.cross(edge, target_to_prev)
         sin_next_target = np.cross(edge, target_to_next)
-        if sin_prev_target < 0 and sin_next_target > 0:
+        if sin_prev_target < 0 < sin_next_target:
             # FIXME: we need a way to short-circuit out of here
             add_source_to_target = False
         sin_prev_source = np.cross(edge, source_to_prev)
         sin_next_source = np.cross(edge, source_to_next)
-        if sin_prev_source > 0 and sin_next_source < 0:
+        if sin_prev_source > 0 > sin_next_source:
             add_source_to_target = False
 
         is_target_prev_source = np.all(source_to_prev == edge)
@@ -254,7 +256,7 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
         if not are_vertices_connected and segment_intersects_contours(source_vertex, target_vertex, contours):
             add_source_to_target = False
 
-    elif segment_intersects_contours(free_source, free_target, contours):
+    elif segment_intersects_contours(free_source, free_target, regions):
         add_source_to_target = False
 
     if add_source_to_target:
@@ -268,7 +270,7 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
     return free_source, free_target
 
 
-def draw_contour_orientations(img: np.ndarray, contours):
+def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray]):
     """
     Draw positive orientation as green, negative as red;
     first vertex is black, last is white
@@ -291,7 +293,8 @@ def draw_graph(img: np.ndarray, graph: Graph):
                          color=(0, 0, 0))
 
 
-def draw_path(img, graph, path, source, free_source, target, free_target):
+def draw_path(img: np.ndarray, graph: Graph, path: list[int], source: np.ndarray, free_source: np.ndarray,
+              target: np.ndarray, free_target: np.ndarray):
     vertices = [graph.vertices[v].astype(np.int32) for v in path]
     cv2.polylines(img, [np.array(vertices)], isClosed=False, color=(192, 64, 64), thickness=2)
 
@@ -341,7 +344,7 @@ def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int) -> list
     return []
 
 
-def reconstruct_path(prev, source: int, target: int) -> list[int]:
+def reconstruct_path(prev: np.ndarray, source: int, target: int) -> list[int]:
     if target == source:
         return [target]
 
@@ -360,7 +363,7 @@ def reconstruct_path(prev, source: int, target: int) -> list[int]:
 
 def distance_to_contours(point: np.ndarray, region_contours: list[np.ndarray]) -> tuple[float, int]:
     """
-    Returns the signed distance from the point to the region contours, as well as the index of the closest contour
+    Returns the signed distance from the point to the region contours, as well as the index of the closest contour.
     Distance is positive if the point is within the free space of the region, else negative.
     """
 
@@ -483,7 +486,7 @@ def main():
 
     # TODO: take the regions into account when building the graph (for performance), but it is probably better
     #  to make only one Graph object
-    graph = build_graph(all_contours)
+    graph = build_graph(regions)
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
@@ -496,10 +499,10 @@ def main():
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, free_space, 0.25, 0.0)
-        draw_contour_orientations(img, [contour for region in regions for contour in region])
+        draw_contour_orientations(img, all_contours)
         cv2.drawContours(img, all_contours, contourIdx=-1, color=(64, 64, 192))
         draw_graph(img, graph)
-        draw_path(img, graph, path, g_source, free_source, g_target, free_target)
+        draw_path(img, graph, path, np.array(g_source), free_source, np.array(g_target), free_target)
 
         cv2.namedWindow('main', cv2.WINDOW_NORMAL)
         cv2.setMouseCallback('main', mouse_callback)
@@ -517,20 +520,5 @@ def mouse_callback(event, x, y, flags, param):
         g_source = (x, y)
 
 
-def pathfinding_test():
-    adjacency = [[Edge(1, 7), Edge(2, 9), Edge(5, 14)],
-                 [Edge(0, 7), Edge(2, 10), Edge(3, 15)],
-                 [Edge(0, 9), Edge(1, 10), Edge(3, 11), Edge(5, 2)],
-                 [Edge(1, 15), Edge(2, 11), Edge(4, 6)],
-                 [Edge(3, 6), Edge(5, 9)],
-                 [Edge(0, 14), Edge(2, 2), Edge(4, 9)]]
-    source = 0
-    target = 4
-    # Correct path for the above: [0, 2, 5, 4]
-    path = dijkstra(adjacency, source, target)
-    print(path)
-
-
 if __name__ == '__main__':
     main()
-    # pathfinding_test()
