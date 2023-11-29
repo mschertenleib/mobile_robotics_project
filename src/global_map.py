@@ -235,16 +235,15 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
             target_contour) - 1] - target_vertex
         target_to_next = target_contour[(target_vertex_index + 1) % len(target_contour)] - target_vertex
 
-        # FIXME: well, this should work but doesn't ... triple check everything
         edge = target_vertex - source_vertex
-        sin_prev_source = np.cross(edge, source_to_prev)
-        sin_next_source = np.cross(edge, source_to_next)
-        if sin_prev_source < 0 and sin_next_source > 0:
-            # FIXME: we need a way to short-circuit out of here
-            add_source_to_target = False
         sin_prev_target = np.cross(edge, target_to_prev)
         sin_next_target = np.cross(edge, target_to_next)
         if sin_prev_target < 0 and sin_next_target > 0:
+            # FIXME: we need a way to short-circuit out of here
+            add_source_to_target = False
+        sin_prev_source = np.cross(edge, source_to_prev)
+        sin_next_source = np.cross(edge, source_to_next)
+        if sin_prev_source > 0 and sin_next_source < 0:
             add_source_to_target = False
 
         is_target_prev_source = np.all(source_to_prev == edge)
@@ -256,15 +255,16 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
         if not are_vertices_connected and segment_intersects_contours(source_vertex, target_vertex, contours):
             add_source_to_target = False
 
-    if segment_intersects_contours(free_source, free_target, contours):
+    elif segment_intersects_contours(free_source, free_target, contours):
         add_source_to_target = False
+
     if add_source_to_target:
-        edge_length = np.linalg.norm(target - source)
+        edge_length = np.linalg.norm(free_target - free_source)
         graph.adjacency[Graph.SOURCE].append(Edge(vertex=Graph.TARGET, length=edge_length))
         graph.adjacency[Graph.TARGET].append(Edge(vertex=Graph.SOURCE, length=edge_length))
 
-    graph.vertices[Graph.SOURCE] = source
-    graph.vertices[Graph.TARGET] = target
+    graph.vertices[Graph.SOURCE] = free_source
+    graph.vertices[Graph.TARGET] = free_target
 
     return free_source, free_target
 
@@ -292,17 +292,17 @@ def draw_graph(img: np.ndarray, graph: Graph):
                          color=(0, 0, 0))
 
 
-def draw_path(img, graph, path, raw_source, free_source, raw_target, free_target):
+def draw_path(img, graph, path, source, free_source, target, free_target):
     vertices = [graph.vertices[v].astype(np.int32) for v in path]
     cv2.polylines(img, [np.array(vertices)], isClosed=False, color=(192, 64, 64), thickness=2)
 
-    cv2.line(img, raw_source, free_source.astype(np.int32), color=(0, 0, 0), thickness=2)
-    cv2.circle(img, free_source.astype(np.int32), color=(192, 64, 64), radius=6, thickness=-1)
-    cv2.circle(img, raw_source, color=(0, 0, 0), radius=6, thickness=-1)
+    cv2.line(img, source, free_source.astype(np.int32), color=(0, 0, 0), thickness=2)
+    cv2.circle(img, free_source.astype(np.int32), color=(0, 0, 0), radius=6, thickness=-1)
+    cv2.circle(img, source, color=(0, 0, 0), radius=6, thickness=-1)
 
-    cv2.line(img, raw_target, free_target.astype(np.int32), color=(0, 0, 0), thickness=2)
-    cv2.circle(img, free_target.astype(np.int32), color=(192, 64, 64), radius=6, thickness=-1)
-    cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
+    cv2.line(img, target, free_target.astype(np.int32), color=(0, 0, 0), thickness=2)
+    cv2.circle(img, free_target.astype(np.int32), color=(0, 0, 0), radius=6, thickness=-1)
+    cv2.circle(img, target, color=(0, 0, 0), radius=6, thickness=-1)
 
 
 def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int) -> list[int]:
@@ -464,8 +464,8 @@ def push_out(point: np.ndarray, regions: list[list[np.ndarray]]) -> tuple[np.nda
     return projection, closest_region, contour_index, vertex_index
 
 
-raw_target = (120, 730)
-raw_source = (200, 100)
+g_target = (120, 730)
+g_source = (200, 100)
 
 
 def main():
@@ -493,14 +493,14 @@ def main():
         # TODO: take the regions into account when building the graph (for performance), but it is probably better
         #  to make only one Graph object
 
-        free_source, free_target = update_graph(graph, regions, np.array(raw_source), np.array(raw_target))
+        free_source, free_target = update_graph(graph, regions, np.array(g_source), np.array(g_target))
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, free_space, 0.25, 0.0)
         draw_contour_orientations(img, [contour for region in regions for contour in region])
         cv2.drawContours(img, all_contours, contourIdx=-1, color=(64, 64, 192))
         draw_graph(img, graph)
-        draw_path(img, graph, path, raw_source, free_source, raw_target, free_target)
+        draw_path(img, graph, path, g_source, free_source, g_target, free_target)
 
         cv2.namedWindow('main', cv2.WINDOW_NORMAL)
         cv2.setMouseCallback('main', mouse_callback)
@@ -511,11 +511,11 @@ def main():
 
 
 def mouse_callback(event, x, y, flags, param):
-    global raw_target, raw_source
+    global g_target, g_source
     if event == cv2.EVENT_MOUSEMOVE:
-        raw_target = (x, y)
+        g_target = (x, y)
     if event == cv2.EVENT_LBUTTONDOWN:
-        raw_source = (x, y)
+        g_source = (x, y)
 
 
 def pathfinding_test():
