@@ -278,7 +278,7 @@ def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int) -> list
     while unvisited_count > 0:
         u = np.ma.MaskedArray(dist, visited).argmin()
         if u == target:
-            break
+            return reconstruct_path(prev, source, target)
 
         visited[u] = True
         unvisited_count -= 1
@@ -290,15 +290,15 @@ def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int) -> list
                     dist[edge.vertex] = alt
                     prev[edge.vertex] = u
 
-    return reconstruct_path(prev, source, target)
+    return []
 
 
 def reconstruct_path(prev, source: int, target: int) -> list[int]:
     if target == source:
         return [target]
 
+    # If the target has no parent it is not reachable
     if prev[target] < 0:
-        # print('Target is not reachable from source')
         return []
 
     path = []
@@ -438,7 +438,7 @@ def main():
 
         cv2.namedWindow('main', cv2.WINDOW_NORMAL)
         cv2.setMouseCallback('main', mouse_callback)
-        cv2.imshow('main', normalize(img))
+        cv2.imshow('main', img)
         if cv2.waitKey(1) == 27:
             break
     cv2.destroyAllWindows()
