@@ -211,7 +211,7 @@ def update_graph(graph: Graph, contours, source, free_source, target, free_targe
         graph.adjacency[edge.vertex].append(Edge(vertex=Graph.TARGET, length=edge.length))
 
     # Add the direct edge from source to target
-    if not segment_intersects_contours(source, target, contours):
+    if not segment_intersects_contours(free_source, free_target, contours):
         edge_length = np.linalg.norm(target - source)
         graph.adjacency[Graph.SOURCE].append(Edge(vertex=Graph.TARGET, length=edge_length))
         graph.adjacency[Graph.TARGET].append(Edge(vertex=Graph.SOURCE, length=edge_length))
@@ -404,12 +404,12 @@ def push_out(point: np.ndarray, regions: list[list[np.ndarray]]) -> np.ndarray:
 
 
 raw_target = (120, 730)
+raw_source = (200, 100)
 
 
 def main():
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    raw_source = (200, 100)
     color_image = cv2.imread('../images/map_divided.png')
     obstacle_mask = get_obstacle_mask(color_image)
 
@@ -425,17 +425,17 @@ def main():
     #  to make only one Graph object
     graph = build_graph(all_contours)
 
-    free_source = push_out(np.array(raw_source), regions)
-
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
 
     while True:
-        # FIXME: we do not detect intersection if source and target are on opposite vertices of the same contour
         free_target = push_out(np.array(raw_target), regions)
+        free_source = push_out(np.array(raw_source), regions)
 
         # TODO: take the regions into account when building the graph (for performance), but it is probably better
         #  to make only one Graph object
+
+        # FIXME: we do not detect intersection if source and target are on opposite vertices of the same contour
         update_graph(graph, all_contours, np.array(raw_source), free_source, np.array(raw_target), free_target)
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
@@ -454,9 +454,11 @@ def main():
 
 
 def mouse_callback(event, x, y, flags, param):
-    global raw_target
+    global raw_target, raw_source
     if event == cv2.EVENT_MOUSEMOVE:
         raw_target = (x, y)
+    if event == cv2.EVENT_LBUTTONDOWN:
+        raw_source = (x, y)
 
 
 def pathfinding_test():
