@@ -235,17 +235,16 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
             target_contour) - 1] - target_vertex
         target_to_next = target_contour[(target_vertex_index + 1) % len(target_contour)] - target_vertex
 
-        # FIXME: this check is wrong, we just need to remove the edge if it "enters" in the shape, this here is more
-        #  restrictive
+        # FIXME: well, this should work but doesn't ... triple check everything
         edge = target_vertex - source_vertex
         sin_prev_source = np.cross(edge, source_to_prev)
         sin_next_source = np.cross(edge, source_to_next)
-        if (sin_prev_source < 0 or sin_next_source < 0) and (sin_prev_source > 0 or sin_next_source > 0):
+        if sin_prev_source < 0 and sin_next_source > 0:
             # FIXME: we need a way to short-circuit out of here
             add_source_to_target = False
         sin_prev_target = np.cross(edge, target_to_prev)
         sin_next_target = np.cross(edge, target_to_next)
-        if (sin_prev_target < 0 or sin_next_target < 0) and (sin_prev_target > 0 or sin_next_target > 0):
+        if sin_prev_target < 0 and sin_next_target > 0:
             add_source_to_target = False
 
         is_target_prev_source = np.all(source_to_prev == edge)
