@@ -346,23 +346,6 @@ def project(pt: cv2.typing.Point2f, contour: cv2.typing.MatLike):
     return closest_point
 
 
-def is_in_region(point: cv2.typing.Point2f, region_contours: list[cv2.typing.MatLike]):
-    """
-    Returns True if the point is within the free space of the given region
-    """
-
-    test = cv2.pointPolygonTest(region_contours[0], point, measureDist=False)
-    if test < 0:
-        return False
-
-    for contour in region_contours[1:]:
-        test = cv2.pointPolygonTest(contour, point, measureDist=False)
-        if test > 0:
-            return False
-
-    return True
-
-
 def distance_to_contours(point: cv2.typing.Point2f, region_contours: list[cv2.typing.MatLike]):
     """
     Returns the signed distance from the point to the region contours, as well as the index of the closest contour

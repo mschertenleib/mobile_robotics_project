@@ -8,14 +8,6 @@ def image_info(img: np.ndarray):
         f'dtype: {img.dtype}, shape: {img.shape}, min: {img.min()}, max: {img.max()}')
 
 
-def normalize(img: np.ndarray):
-    range_values = img.max() - img.min()
-    if range_values == 0:
-        return img.astype(np.float32)
-    else:
-        return (img.astype(np.float32) - img.min()) / range_values
-
-
 def transform_perspective(matrix, point):
     transformed = matrix @ np.array([point[0], point[1], 1])
     return transformed[0:2] / transformed[2]
