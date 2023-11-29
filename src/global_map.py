@@ -1,3 +1,5 @@
+import cv2.typing
+
 from image_processing import *
 
 
@@ -70,6 +72,7 @@ def extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float) -> list[
     """
 
     # Inverting the mask means we get the contours of free regions instead of the contours of obstacles
+    # TODO(performance): remove the clip if we KNOW the mask is binary
     inverted_mask = 1 - obstacle_mask.clip(0, 1)
 
     # NOTE: we assume the orientation of retrieved contours is as explained above. This is not explicitly stated in the
@@ -103,7 +106,7 @@ def extract_convex_vertices(contours: list[cv2.typing.MatLike]):
     for contour in contours:
         for i in range(len(contour)):
             to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
-            to_next_i = contour[i + 1 if i < len(contour) - 1 else 0] - contour[i]
+            to_next_i = contour[(i + 1) % len(contour)] - contour[i]
             if np.cross(to_prev_i, to_next_i) <= 0:
                 vertices.append(contour[i])
                 to_prev.append(to_prev_i)
@@ -307,7 +310,7 @@ def reconstruct_path(prev, source: int, target: int) -> list[int]:
     return path
 
 
-def project(pt, contour):
+def project(pt: cv2.typing.Point2f, contour: cv2.typing.MatLike):
     """
     Returns the point on the contour that is the closest to pt
     """
@@ -317,7 +320,7 @@ def project(pt, contour):
 
     for i in range(len(contour)):
         pt1 = contour[i]
-        pt2 = contour[i + 1 if i < len(contour) - 1 else 0]
+        pt2 = contour[(i + 1) % len(contour)]
         edge = pt2 - pt1
         to_pt1 = pt1 - pt
         to_pt2 = pt2 - pt
@@ -328,7 +331,7 @@ def project(pt, contour):
             normal /= np.linalg.norm(normal)
             distance = np.dot(to_pt1, normal)
             if np.abs(distance) < min_distance:
-                closest_point = pt + (distance + 1e-2) * normal
+                closest_point = pt + (distance + 1e-3) * normal
                 min_distance = np.abs(distance)
         else:
             distance = np.linalg.norm(to_pt1)
@@ -381,26 +384,24 @@ def distance_to_contours(point: cv2.typing.Point2f, region_contours: list[cv2.ty
     return distances[closest_contour], closest_contour
 
 
-def push_out(point: cv2.typing.Point2f, regions: list[list[cv2.typing.MatLike]]):
-    distances_to_outlines = np.empty(len(regions))
+def push_out(point: cv2.typing.Point2f, regions: list[list[cv2.typing.MatLike]]) -> cv2.typing.Point2f:
+    distances = np.empty(len(regions), dtype=np.float32)
+    contour_indices = np.empty(len(regions), dtype=np.int32)
     for i in range(len(regions)):
         distance, contour_index = distance_to_contours(point, regions[i])
         if distance >= 0:
             # We are in free space in this region, nothing to do
             return point
 
-        if contour_index != 0:
-            # We are in a hole in this region
-            # FIXME: we might actually be in an inner region here !!
-            return project(point, regions[i][contour_index])
+        # We are outside of this region or in a hole within it, record how far we are from it
+        distances[i] = distance
+        contour_indices[i] = contour_index
 
-        # We are outside of this region, record how far we are from it
-        distances_to_outlines[i] = distance
-    # If we got here, it means we are outside of all regions (i.e. in an obstacle separating two regions, or in the
-    # outer border. We also know that all distances are negative
-    closest_region = np.argmax(distances_to_outlines)
-    # Project the point on the closest region's outline (i.e. contour 0)
-    return project(point, regions[closest_region][0])
+    # If we got here, it means we are in an obstacle. We also know that all distances are negative.
+    closest_region = np.argmax(distances)
+    # Project the point on the closest contour
+    contour_index = contour_indices[closest_region]
+    return project(point, regions[closest_region][contour_index])
 
 
 raw_target = (120, 730)
