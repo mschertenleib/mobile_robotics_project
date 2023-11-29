@@ -378,6 +378,12 @@ def distance_to_contours(point: np.ndarray, region_contours: list[np.ndarray]):
 
 
 def push_out(point: np.ndarray, regions: list[list[np.ndarray]]) -> np.ndarray:
+    """
+    If the point is inside an obstacle, returns the point on the boundary that is the closest.
+    If the point is in free space, returns is unchanged.
+    Note: the resulting point might be either float or int.
+    """
+
     distances = np.empty(len(regions), dtype=np.float32)
     contour_indices = np.empty(len(regions), dtype=np.int32)
     for i in range(len(regions)):
@@ -419,22 +425,14 @@ def main():
     #  to make only one Graph object
     graph = build_graph(all_contours)
 
-    free_source = push_out(np.float32(raw_source), regions)
+    free_source = push_out(np.array(raw_source), regions)
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
 
     while True:
         # FIXME: we do not detect intersection if source and target are on opposite vertices of the same contour
-        free_target = push_out(np.float32(raw_target), regions)
-        print(free_target.dtype)
-
-        distance = -np.inf
-        for region_contours in regions:
-            dist, contour_index = distance_to_contours(free_target, region_contours)
-            if dist > distance:
-                distance = dist
-        assert distance >= 0
+        free_target = push_out(np.array(raw_target), regions)
 
         # TODO: take the regions into account when building the graph (for performance), but it is probably better
         #  to make only one Graph object
