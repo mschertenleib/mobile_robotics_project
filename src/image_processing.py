@@ -169,7 +169,7 @@ def draw_contour_orientations(img, contours, orientations):
             cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
-def detect_robot_vertices(hsv: cv2.typing.MatLike):
+def detect_robot_vertices(hsv: np.ndarray):
     lower_green = np.array([55, 50, 50])
     upper_green = np.array([75, 255, 255])
     mask = cv2.inRange(hsv, lower_green, upper_green)
@@ -232,7 +232,7 @@ def get_robot_pose(robot_vertices: np.ndarray, distance_center_back: float):
     return position, direction
 
 
-def detect_target(hsv: cv2.typing.MatLike):
+def detect_target(hsv: np.ndarray):
     lower_pink = np.array([165, 50, 50])
     upper_pink = np.array([175, 255, 255])
     mask = cv2.inRange(hsv, lower_pink, upper_pink)
@@ -254,7 +254,7 @@ def detect_target(hsv: cv2.typing.MatLike):
     return np.array([px, py])
 
 
-def detect_map_corners(hsv: cv2.typing.MatLike):
+def detect_map_corners(hsv: np.ndarray):
     lower_blue = np.array([100, 100, 50])
     upper_blue = np.array([115, 200, 200])
     mask = cv2.inRange(hsv, lower_blue, upper_blue)

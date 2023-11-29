@@ -62,7 +62,7 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours) -> b
     return False
 
 
-def extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float) -> list[list[cv2.typing.MatLike]]:
+def extract_contours(obstacle_mask: np.ndarray, epsilon: float) -> list[list[np.ndarray]]:
     """
     Get a list of contour regions from the given obstacle_mask, using the given epsilon for polygon approximation.
     Each contour region is a list of contours, where the first one is the outline of a region of free space,
@@ -99,7 +99,7 @@ def extract_contours(obstacle_mask: cv2.typing.MatLike, epsilon: float) -> list[
     return regions
 
 
-def extract_convex_vertices(contours: list[cv2.typing.MatLike]):
+def extract_convex_vertices(contours: list[np.ndarray]):
     vertices = []
     to_prev = []
     to_next = []
@@ -114,7 +114,7 @@ def extract_convex_vertices(contours: list[cv2.typing.MatLike]):
     return vertices, to_prev, to_next
 
 
-def extract_static_adjacency(contours: list[cv2.typing.MatLike], vertices, to_prev, to_next):
+def extract_static_adjacency(contours: list[np.ndarray], vertices, to_prev, to_next):
     adjacency = [[] for _ in range(len(vertices))]
     for i in range(len(vertices)):
         for j in range(i + 1, len(vertices)):
@@ -146,7 +146,7 @@ def extract_static_adjacency(contours: list[cv2.typing.MatLike], vertices, to_pr
     return adjacency
 
 
-def extract_dynamic_edges(contours: list[cv2.typing.MatLike], vertices, to_prev, to_next, point):
+def extract_dynamic_edges(contours: list[np.ndarray], vertices, to_prev, to_next, point):
     edges = []
     for i in range(len(vertices)):
 
@@ -170,7 +170,7 @@ def extract_dynamic_edges(contours: list[cv2.typing.MatLike], vertices, to_prev,
     return edges
 
 
-def build_graph(contours: list[cv2.typing.MatLike]) -> Graph:
+def build_graph(contours: list[np.ndarray]) -> Graph:
     vertices, to_prev, to_next = extract_convex_vertices(contours)
     adjacency = extract_static_adjacency(contours, vertices, to_prev, to_next)
     # Reserve source and target vertices
@@ -220,7 +220,7 @@ def update_graph(graph: Graph, contours, source, free_source, target, free_targe
     graph.vertices[Graph.TARGET] = target
 
 
-def draw_contour_orientations(img: cv2.typing.MatLike, contours):
+def draw_contour_orientations(img: np.ndarray, contours):
     """
     Draw positive orientation as green, negative as red;
     first vertex is black, last is white
@@ -228,14 +228,14 @@ def draw_contour_orientations(img: cv2.typing.MatLike, contours):
     for c in range(len(contours)):
         orientation = np.sign(cv2.contourArea(contours[c], oriented=True))
         color = (64, 192, 64) if orientation >= 0 else (64, 64, 192)
-        cv2.drawContours(img, [contours[c]], contourIdx=-1, color=color, thickness=3)
+        cv2.drawContours(img, [contours[c]], contourIdx=-1, color=color, thickness=2)
         n_points = len(contours[c])
         for i in range(n_points):
             brightness = i / (n_points - 1) * 255
             cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
-def draw_graph(img: cv2.typing.MatLike, graph: Graph):
+def draw_graph(img: np.ndarray, graph: Graph):
     for i in range(len(graph.adjacency)):
         for edge in graph.adjacency[i]:
             if edge.vertex > i or edge.vertex < 0:
@@ -245,14 +245,14 @@ def draw_graph(img: cv2.typing.MatLike, graph: Graph):
 
 def draw_path(img, graph, path, raw_source, free_source, raw_target, free_target):
     vertices = [graph.vertices[v].astype(np.int32) for v in path]
-    cv2.polylines(img, [np.array(vertices)], isClosed=False, color=(64, 64, 192), thickness=3)
+    cv2.polylines(img, [np.array(vertices)], isClosed=False, color=(192, 64, 64), thickness=2)
 
-    cv2.line(img, raw_source, free_source.astype(np.int32), color=(0, 0, 0), thickness=3)
-    cv2.circle(img, free_source.astype(np.int32), color=(64, 192, 64), radius=6, thickness=-1)
+    cv2.line(img, raw_source, free_source.astype(np.int32), color=(0, 0, 0), thickness=2)
+    cv2.circle(img, free_source.astype(np.int32), color=(192, 64, 64), radius=6, thickness=-1)
     cv2.circle(img, raw_source, color=(0, 0, 0), radius=6, thickness=-1)
 
-    cv2.line(img, raw_target, free_target.astype(np.int32), color=(0, 0, 0), thickness=3)
-    cv2.circle(img, free_target.astype(np.int32), color=(64, 64, 192), radius=6, thickness=-1)
+    cv2.line(img, raw_target, free_target.astype(np.int32), color=(0, 0, 0), thickness=2)
+    cv2.circle(img, free_target.astype(np.int32), color=(192, 64, 64), radius=6, thickness=-1)
     cv2.circle(img, raw_target, color=(0, 0, 0), radius=6, thickness=-1)
 
 
@@ -310,12 +310,12 @@ def reconstruct_path(prev, source: int, target: int) -> list[int]:
     return path
 
 
-def project(pt: cv2.typing.Point2f, contour: cv2.typing.MatLike):
+def project(pt: np.ndarray, contour: np.ndarray) -> np.ndarray:
     """
     Returns the point on the contour that is the closest to pt
     """
 
-    closest_point = np.array([np.inf, np.inf])
+    closest_point = np.empty(2)
     min_distance = np.inf
 
     for i in range(len(contour)):
@@ -324,15 +324,25 @@ def project(pt: cv2.typing.Point2f, contour: cv2.typing.MatLike):
         edge = pt2 - pt1
         to_pt1 = pt1 - pt
         to_pt2 = pt2 - pt
-        normal = np.float32([-edge[1], edge[0]])
-        n_cross_pt1 = np.cross(normal, to_pt1)
-        n_cross_pt2 = np.cross(normal, to_pt2)
+        exterior_normal = np.float32([edge[1], -edge[0]])
+        n_cross_pt1 = np.cross(exterior_normal, to_pt1)
+        n_cross_pt2 = np.cross(exterior_normal, to_pt2)
+
+        # If this is true, the projection of the point on the segment lies somewhere between the two vertices
         if (n_cross_pt1 < 0 < n_cross_pt2) or (n_cross_pt1 > 0 > n_cross_pt2):
-            normal /= np.linalg.norm(normal)
-            distance = np.dot(to_pt1, normal)
+            exterior_normal /= np.linalg.norm(exterior_normal)
+            distance = np.dot(to_pt1, exterior_normal)
             if np.abs(distance) < min_distance:
-                closest_point = pt + (distance + 1e-3) * normal
+                # If the distance is positive, the point is on the interior side of this part of the contour. If the
+                # distance is negative, the point is on the exterior side of this part of the contour, but it might
+                # be inside the contour somewhere else!
+                # Offset by a small distance towards the exterior normal, to avoid floating point issues (because we
+                # cannot get a resulting point exactly on the segment, without the offset the point might be
+                # accidentally still considered as inside the contour).
+                closest_point = pt + (distance + 1e-3) * exterior_normal
                 min_distance = np.abs(distance)
+
+        # Else the projection of the point on the segment lies on or beyond one of the vertices
         else:
             distance = np.linalg.norm(to_pt1)
             if distance < min_distance:
@@ -346,19 +356,19 @@ def project(pt: cv2.typing.Point2f, contour: cv2.typing.MatLike):
     return closest_point
 
 
-def distance_to_contours(point: cv2.typing.Point2f, region_contours: list[cv2.typing.MatLike]):
+def distance_to_contours(point: np.ndarray, region_contours: list[np.ndarray]):
     """
     Returns the signed distance from the point to the region contours, as well as the index of the closest contour
     Distance is positive if the point is within the free space of the region, else negative.
     """
 
     distances = np.empty(len(region_contours))
-    distances[0] = cv2.pointPolygonTest(region_contours[0], point, measureDist=True)
+    distances[0] = cv2.pointPolygonTest(region_contours[0], np.float32(point), measureDist=True)
     if distances[0] < 0:  # The point is outside the region
         return distances[0], 0
 
     for i in range(1, len(region_contours)):
-        distances[i] = cv2.pointPolygonTest(region_contours[i], point, measureDist=True)
+        distances[i] = cv2.pointPolygonTest(region_contours[i], np.float32(point), measureDist=True)
         if distances[i] > 0:  # The point is inside an inner obstacle
             return -distances[i], i
         distances[i] = -distances[i]
@@ -367,7 +377,7 @@ def distance_to_contours(point: cv2.typing.Point2f, region_contours: list[cv2.ty
     return distances[closest_contour], closest_contour
 
 
-def push_out(point: cv2.typing.Point2f, regions: list[list[cv2.typing.MatLike]]) -> cv2.typing.Point2f:
+def push_out(point: np.ndarray, regions: list[list[np.ndarray]]) -> np.ndarray:
     distances = np.empty(len(regions), dtype=np.float32)
     contour_indices = np.empty(len(regions), dtype=np.int32)
     for i in range(len(regions)):
@@ -417,6 +427,14 @@ def main():
     while True:
         # FIXME: we do not detect intersection if source and target are on opposite vertices of the same contour
         free_target = push_out(np.float32(raw_target), regions)
+        print(free_target.dtype)
+
+        distance = -np.inf
+        for region_contours in regions:
+            dist, contour_index = distance_to_contours(free_target, region_contours)
+            if dist > distance:
+                distance = dist
+        assert distance >= 0
 
         # TODO: take the regions into account when building the graph (for performance), but it is probably better
         #  to make only one Graph object
@@ -424,17 +442,10 @@ def main():
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         img = cv2.addWeighted(color_image, 0.75, free_space, 0.25, 0.0)
+        draw_contour_orientations(img, [contour for region in regions for contour in region])
         cv2.drawContours(img, all_contours, contourIdx=-1, color=(64, 64, 192))
         draw_graph(img, graph)
         draw_path(img, graph, path, raw_source, free_source, raw_target, free_target)
-
-        y = 70
-        for i in range(len(regions)):
-            # Well, distance_to_contours seems to be working
-            distance, contour_index = distance_to_contours(np.float32(raw_target), regions[i])
-            cv2.putText(img, f'{i} {distance:.2f} {contour_index}', org=(10, y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=1, color=(0, 0, 0), lineType=cv2.LINE_AA)
-            y += 40
 
         cv2.namedWindow('main', cv2.WINDOW_NORMAL)
         cv2.setMouseCallback('main', mouse_callback)
