@@ -72,8 +72,7 @@ def extract_contours(obstacle_mask: np.ndarray, epsilon: float) -> list[list[np.
     """
 
     # Inverting the mask means we get the contours of free regions instead of the contours of obstacles
-    # TODO(performance): remove the clip if we KNOW the mask is binary
-    inverted_mask = 1 - obstacle_mask.clip(0, 1)
+    inverted_mask = 1 - obstacle_mask
 
     # NOTE: we assume the orientation of retrieved contours is as explained above. This is not explicitly stated in the
     # OpenCV documentation, but seems to be the case
