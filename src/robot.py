@@ -5,11 +5,13 @@ class Thymio:
     # X axis towards the right
     # Y axis towards the front
     # theta from x to y
-    # All distances are in mm, angles in radians
+    # All lengths are in mm, angles in radians
 
-    POINT_BACK = np.array([0, -16])
-    POINT_FRONT_LEFT = np.array([-35, 56])
-    POINT_FRONT_RIGHT = np.array([35, 56])
+    MARKER_SIZE = 57.0
+    MARKER_FRONT_LEFT = np.array([-MARKER_SIZE * 0.5, MARKER_SIZE * 0.5])
+    MARKER_FRONT_RIGHT = np.array([MARKER_SIZE * 0.5, MARKER_SIZE * 0.5])
+    MARKER_REAR_RIGHT = np.array([MARKER_SIZE * 0.5, -MARKER_SIZE * 0.5])
+    MARKER_REAR_LEFT = np.array([-MARKER_SIZE * 0.5, -MARKER_SIZE * 0.5])
     RADIUS = 80
     _OUTLINE = np.array([[-56, -30],
                          [56, -30],
@@ -24,7 +26,10 @@ class Thymio:
         self.pos_y = pos_y
         self.theta = theta
 
-    def get_outline(self):
+    def get_outline(self) -> np.ndarray:
+        """
+        Returns the robot outline in world space
+        """
         rot = np.array([[np.cos(self.theta), -np.sin(self.theta)], [np.sin(self.theta), np.cos(self.theta)]])
         pos = np.array([self.pos_x, self.pos_y])
         return pos + (rot @ self._OUTLINE.T).T
