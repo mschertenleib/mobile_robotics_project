@@ -169,7 +169,7 @@ def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray], orien
             cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
-def detect_robot_vertices(hsv: np.ndarray):
+def detect_robot_vertices_old(hsv: np.ndarray):
     lower_green = np.array([55, 50, 50])
     upper_green = np.array([75, 255, 255])
     mask = cv2.inRange(hsv, lower_green, upper_green)
@@ -195,9 +195,7 @@ def detect_robot_vertices(hsv: np.ndarray):
     return vertices
 
 
-# TODO: look at https://docs.opencv.org/4.x/d5/dae/tutorial_aruco_detection.html !!!
-#  That might be 10x more robust
-def get_robot_pose(robot_vertices: np.ndarray, distance_center_back: float):
+def get_robot_pose_old(robot_vertices: np.ndarray, distance_center_back: float):
     """
     Compute the robot pose (position, direction) in image space from its three detected markers
     """
@@ -230,6 +228,25 @@ def get_robot_pose(robot_vertices: np.ndarray, distance_center_back: float):
     position = back + distance_center_back * direction
 
     return position, direction
+
+
+def get_robot_pose(img: np.ndarray, detector: cv2.aruco.ArucoDetector):
+    """
+    Compute the robot position and direction in image space
+    """
+
+    corners, ids, rejected = detector.detectMarkers(img)
+
+    if ids is not None and len(ids) > 0:
+        cv2.aruco.drawDetectedMarkers(img, corners, ids)
+        for i in range(len(ids)):
+            center = np.zeros(2)
+            for j in range(4):
+                center += 0.25 * corners[i][0, j]
+            cv2.drawMarker(img, position=center.astype(np.int32), color=(0, 0, 255), markerSize=10,
+                           markerType=cv2.MARKER_CROSS)
+
+    # return position, direction
 
 
 def detect_target(hsv: np.ndarray):

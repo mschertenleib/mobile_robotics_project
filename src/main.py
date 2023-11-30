@@ -73,7 +73,7 @@ def main():
         cv2.imshow('frame_img', frame_img)
 
         hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
-        robot_vertices = detect_robot_vertices(hsv)
+        robot_vertices = detect_robot_vertices_old(hsv)
         text_y = 25
         if robot_vertices is None:
             cv2.putText(warped_img, 'Robot not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
@@ -88,7 +88,7 @@ def main():
 
             # FIXME: this is just a temporary hack
             distance_center_back_px = np.abs(thymio.POINT_BACK[1]) / width_mm * dst_width
-            position_img, direction_img = get_robot_pose(robot_vertices, distance_center_back_px)
+            position_img, direction_img = get_robot_pose_old(robot_vertices, distance_center_back_px)
             cv2.circle(warped_img, center=position_img.astype(np.int32), radius=4, color=(0, 255, 0), thickness=-1,
                        lineType=cv2.LINE_AA)
             cv2.arrowedLine(warped_img, position_img.astype(np.int32),
