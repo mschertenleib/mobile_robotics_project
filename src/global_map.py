@@ -165,7 +165,7 @@ def extract_dynamic_edges(regions: list[list[np.ndarray]], vertices: list[np.nda
         is_pt_prev_i = np.all(to_prev[i] == -edge)
         is_pt_next_i = np.all(to_next[i] == -edge)
         are_pts_connected = is_pt_prev_i or is_pt_next_i
-        if not are_pts_connected and segment_intersects_contours(point, vertices[i], contours):
+        if not are_pts_connected and segment_intersects_contours(point, vertices[i], regions):
             continue
 
         edge_length = np.linalg.norm(edge)
@@ -253,7 +253,7 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
         is_source_next_target = np.all(target_to_next == -edge)
         are_vertices_connected = (is_target_prev_source or is_target_next_source) and (
                 is_source_prev_target or is_source_next_target)
-        if not are_vertices_connected and segment_intersects_contours(source_vertex, target_vertex, contours):
+        if not are_vertices_connected and segment_intersects_contours(source_vertex, target_vertex, regions):
             add_source_to_target = False
 
     elif segment_intersects_contours(free_source, free_target, regions):
