@@ -230,26 +230,38 @@ def get_robot_pose_old(robot_vertices: np.ndarray, distance_center_back: float):
     return position, direction
 
 
-def get_robot_pose(img: np.ndarray, detector: cv2.aruco.ArucoDetector):
+def detect_robot(marker_corners, marker_ids) -> tuple[bool, np.ndarray, np.ndarray]:
     """
-    Compute the robot position and direction in image space
+    Returns whether the robot was detected, its position and its direction in image space
     """
 
-    corners, ids, rejected = detector.detectMarkers(img)
+    if marker_ids is not None and len(marker_ids) > 0:
+        marker_index = np.argwhere(marker_ids[0] == 4)
+        if len(marker_index) > 0:
+            corners = marker_corners[marker_index[0, 0]][0]
+            position = np.sum(corners, 0) / 4
+            direction = (corners[0] + corners[1]) / 2 - (corners[2] + corners[3]) / 2
+            return True, position, direction
 
-    if ids is not None and len(ids) > 0:
-        cv2.aruco.drawDetectedMarkers(img, corners, ids)
-        for i in range(len(ids)):
-            center = np.zeros(2)
-            for j in range(4):
-                center += 0.25 * corners[i][0, j]
-            cv2.drawMarker(img, position=center.astype(np.int32), color=(0, 0, 255), markerSize=10,
-                           markerType=cv2.MARKER_CROSS)
-
-    # return position, direction
+    return False, np.zeros(2), np.zeros(2)
 
 
-def detect_target(hsv: np.ndarray):
+def detect_target(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
+    """
+    Returns whether the target was detected and its position in image space
+    """
+
+    if marker_ids is not None and len(marker_ids) > 0:
+        marker_index = np.argwhere(marker_ids[0] == 5)
+        if len(marker_index) > 0:
+            corners = marker_corners[marker_index[0, 0]][0]
+            position = np.sum(corners, 0) / 4
+            return True, position
+
+    return False, np.zeros(2)
+
+
+def detect_target_old(hsv: np.ndarray):
     lower_pink = np.array([165, 50, 50])
     upper_pink = np.array([175, 255, 255])
     mask = cv2.inRange(hsv, lower_pink, upper_pink)

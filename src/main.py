@@ -102,7 +102,7 @@ def main():
             outline = np.array([transform_affine(world_to_image, pt) for pt in outline], dtype=np.int32)
             cv2.polylines(warped_img, [outline], isClosed=True, color=(0, 0, 255), thickness=2, lineType=cv2.LINE_AA)
 
-        target = detect_target(hsv)
+        target = detect_target_old(hsv)
         if target is None:
             cv2.putText(warped_img, 'Target not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 64, 192), lineType=cv2.LINE_AA)

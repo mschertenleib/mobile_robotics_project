@@ -1,7 +1,3 @@
-import cv2
-
-import numpy as np
-
 from image_processing import *
 
 
@@ -19,7 +15,22 @@ def main():
             break
 
         img = frame.copy()
-        get_robot_pose(img, detector)
+
+        corners, ids, rejected = detector.detectMarkers(img)
+
+        robot_found, robot_position, robot_direction = detect_robot(corners, ids)
+        target_found, target_position = detect_target(corners, ids)
+
+        if robot_found:
+            pos = robot_position.astype(np.int32)
+            tip = (robot_position + robot_direction).astype(np.int32)
+            cv2.line(img, pos, tip, color=(0, 0, 255))
+            cv2.drawMarker(img, position=pos, color=(0, 0, 255), markerSize=10,
+                           markerType=cv2.MARKER_CROSS)
+
+        if target_found:
+            cv2.drawMarker(img, position=target_position.astype(np.int32), color=(0, 255, 0), markerSize=10,
+                           markerType=cv2.MARKER_CROSS)
 
         cv2.imshow("main", img)
         key = cv2.waitKey(1) & 0xff
