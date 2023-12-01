@@ -1,7 +1,6 @@
-from robot import *
-import parameters
-
+import numpy as np
 import cv2
+import typing
 
 
 def image_info(img: np.ndarray):
@@ -37,8 +36,9 @@ def get_perspective_transform(map_corners: np.ndarray, dst_width: int, dst_heigh
     return cv2.getPerspectiveTransform(pts_src, pts_dst)
 
 
-def get_obstacle_mask(img: np.ndarray, dilation_size_px: int, robot_position: np.ndarray, robot_radius_px: int,
-                      target_position: np.ndarray, target_radius_px: int) -> np.ndarray:
+def get_obstacle_mask(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
+                      robot_radius_px: int, target_position: typing.Optional[np.ndarray], target_radius_px: int,
+                      marker_size_px: int, map_width_px: int, map_height_px: int) -> np.ndarray:
     """
     Returns a binary obstacle mask of the given color image, where 1 represents an obstacle.
     A border is also added.
@@ -48,11 +48,22 @@ def get_obstacle_mask(img: np.ndarray, dilation_size_px: int, robot_position: np
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
 
+    # Mask out the robot, target and corner markers, to not consider them as obstacles
+    if robot_position is not None:
+        cv2.circle(img, center=robot_position.astype(np.int32), radius=robot_radius_px, color=[0], thickness=-1)
+    if target_position is not None:
+        cv2.circle(img, center=target_position.astype(np.int32), radius=target_radius_px, color=[0], thickness=-1)
+    cv2.rectangle(img, pt1=(0, 0), pt2=(marker_size_px, marker_size_px), color=[0], thickness=-1)
+    cv2.rectangle(img, pt1=(map_width_px - marker_size_px, 0), pt2=(map_width_px, marker_size_px), color=[0],
+                  thickness=-1)
+    cv2.rectangle(img, pt1=(0, map_height_px - marker_size_px), pt2=(marker_size_px, map_height_px), color=[0],
+                  thickness=-1)
+    cv2.rectangle(img, pt1=(map_width_px - marker_size_px, map_height_px - marker_size_px),
+                  pt2=(map_width_px, map_height_px), color=[0], thickness=-1)
+
+    # Filter isolated obstacle pixels
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel, dst=img, iterations=1)
-
-    cv2.circle(img, center=robot_position.astype(np.int32), radius=robot_radius_px, color=[0], thickness=-1)
-    cv2.circle(img, center=target_position.astype(np.int32), radius=target_radius_px, color=[0], thickness=-1)
 
     # Create borders
     img[:, 0] = 1
@@ -60,7 +71,8 @@ def get_obstacle_mask(img: np.ndarray, dilation_size_px: int, robot_position: np
     img[0, :] = 1
     img[-1, :] = 1
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_size_px, dilation_size_px))
+    dilation_kernel_size = 2 * dilation_radius_px + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_kernel_size, dilation_kernel_size))
     img = cv2.dilate(img, kernel)
 
     return img

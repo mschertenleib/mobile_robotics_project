@@ -1,16 +1,20 @@
 import numpy as np
+import typing
 
 from camera_calibration import *
 from global_map import *
-import parameters
+from parameters import *
+from image_processing import *
 
 
-def build_static_graph(img: np.ndarray, dilation_size_px: int, robot_position: np.ndarray, robot_radius_px: int,
-                       target_position: np.ndarray, target_radius_px: int) -> tuple[list[list[np.ndarray]], Graph]:
+def build_static_graph(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
+                       robot_radius_px: int, target_position: typing.Optional[np.ndarray], target_radius_px: int,
+                       marker_size_px: int, map_width_px: int, map_height_px: int) -> tuple[
+    list[list[np.ndarray]], Graph]:
     # Note: the minimum distance to any obstacle is 'dilation_size_px - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    obstacle_mask = get_obstacle_mask(img, dilation_size_px, robot_position, robot_radius_px, target_position,
-                                      target_radius_px)
+    obstacle_mask = get_obstacle_mask(img, dilation_radius_px, robot_position, robot_radius_px, target_position,
+                                      target_radius_px, marker_size_px, map_width_px, map_height_px)
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
     graph = build_graph(regions)
     return regions, graph
@@ -31,6 +35,15 @@ def build_draw_dynamic_graph(img: np.ndarray, graph: Graph, regions: list[list[n
     free_source, free_target = update_graph(graph, regions, source, target)
     path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
     draw_path(img, graph, path, source, free_source, target, free_target)
+
+
+def get_robot_outline(x: float, y: float, theta: float) -> np.ndarray:
+    """
+    Returns the robot outline in world space
+    """
+    rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    pos = np.array([x, y])
+    return pos + (rot @ ROBOT_OUTLINE.T).T
 
 
 def main():
@@ -59,8 +72,6 @@ def main():
     img_map = np.zeros_like(frame_map)
     base_img_map = np.zeros_like(frame_map)
 
-    thymio = Thymio()
-
     detector_params = cv2.aruco.DetectorParameters()
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
     detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
@@ -76,9 +87,10 @@ def main():
     graph = None
     regions = None
 
-    dilation_size_px = int((Thymio.RADIUS + 20) / map_width_mm * map_width_px)
-    robot_radius_px = int((Thymio.RADIUS + 20) / map_width_mm * map_width_px)
-    target_radius_px = int((parameters.TARGET_RADIUS + 20) / map_width_mm * map_width_px)
+    dilation_radius_px = int((ROBOT_RADIUS + 10) / map_width_mm * map_width_px)
+    robot_radius_px = int((ROBOT_RADIUS + 20) / map_width_mm * map_width_px)
+    target_radius_px = int((TARGET_RADIUS + 20) / map_width_mm * map_width_px)
+    marker_size_px = int((MARKER_SIZE + 5) / map_width_mm * map_width_px)
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -136,10 +148,10 @@ def main():
                            markerType=cv2.MARKER_CROSS, line_type=cv2.LINE_AA)
 
             robot_position_world = transform_affine(image_to_world, robot_position)
-            thymio.pos_x = robot_position_world[0]
-            thymio.pos_y = robot_position_world[1]
-            thymio.theta = np.arctan2(-robot_direction[0], -robot_direction[1])
-            outline = thymio.get_outline().astype(np.int32)
+            robot_x = robot_position_world.item(0)
+            robot_y = robot_position_world.item(1)
+            robot_theta = np.arctan2(-robot_direction[0], -robot_direction[1])
+            outline = get_robot_outline(robot_x, robot_y, robot_theta).astype(np.int32)
             outline = np.array([transform_affine(world_to_image, pt) for pt in outline], dtype=np.int32)
             cv2.polylines(img_map, [outline], isClosed=True, color=(0, 0, 255), thickness=2,
                           lineType=cv2.LINE_AA)
@@ -167,8 +179,16 @@ def main():
         if key == 27:
             break
         elif key == ord('m'):
-            regions, graph = build_static_graph(frame_map, dilation_size_px, robot_position, robot_radius_px,
-                                                target_position, target_radius_px)
+
+            regions, graph = build_static_graph(frame_map,
+                                                dilation_radius_px,
+                                                robot_position if robot_found else None,
+                                                robot_radius_px,
+                                                target_position if target_found else None,
+                                                target_radius_px,
+                                                marker_size_px,
+                                                map_width_px,
+                                                map_height_px)
 
         cv2.imshow('Undistorted frame', img_undistorted)
         cv2.imshow('Map', img_map)
