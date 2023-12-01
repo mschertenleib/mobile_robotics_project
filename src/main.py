@@ -104,6 +104,7 @@ def main():
     graph = None
     regions = None
     path = []
+    path_world = []
     source_position = np.zeros(2)
     stored_target_position = np.zeros(2)
     free_source = None
@@ -120,6 +121,7 @@ def main():
         global graph
         global regions
         global path
+        global path_world
         global source_position
         global stored_target_position
         global free_source
@@ -197,9 +199,6 @@ def main():
             cv2.polylines(img_map, [outline], isClosed=True, color=(0, 0, 255), thickness=2,
                           lineType=cv2.LINE_AA)
 
-            path_world = np.array(
-                [transform_affine(world_to_image, graph.vertices[path[i]]) for i in range(1, len(path))])
-
             measurements = np.array([[robot_x], [robot_y], [robot_theta]])
             if loop_index == 0:
                 prev_x_est[:] = measurements
@@ -248,6 +247,10 @@ def main():
                 stored_target_position = target_position
                 free_source, free_target = update_graph(graph, regions, source_position, stored_target_position)
                 path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
+                path_world = np.empty((len(path) - 1, 3))
+                path_world[:, :2] = np.array(
+                    [transform_affine(world_to_image, graph.vertices[path[i]]) for i in range(1, len(path))])
+                path_world[:, 2] = np.arctan2(path_world[:, 1], path_world[:, 0])
 
         cv2.imshow('Undistorted frame', img_undistorted)
         cv2.imshow('Map', img_map)
