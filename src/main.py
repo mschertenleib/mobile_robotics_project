@@ -1,3 +1,4 @@
+from camera_calibration import *
 from global_map import *
 
 
@@ -21,14 +22,6 @@ def build_draw_graph(img):
 
 
 def main():
-    use_image = True
-    if use_image:
-        frame_from_file = cv2.imread('frame.png')
-
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-
     dst_width = 594
     dst_height = 420
     warped = np.zeros((dst_height, dst_width, 3), dtype=np.uint8)
@@ -41,21 +34,36 @@ def main():
 
     thymio = Thymio()
 
+    detector_params = cv2.aruco.DetectorParameters()
+    dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
+    detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
+
+    camera_matrix, distortion_coeffs = calibrate_camera()
+    json_filename = 'camera.json'
+    store_to_json(json_filename, camera_matrix, distortion_coeffs)
+    camera_matrix, distortion_coeffs = load_from_json(json_filename)
+    new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs, (dst_width, dst_height), 0,
+                                                           (dst_width, dst_height))
+
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             print('Cannot read frame')
             break
-        if use_image:
-            frame = frame_from_file
-
-        filtered_frame = cv2.bilateralFilter(frame, 15, 150, 150)
-        hsv = cv2.cvtColor(filtered_frame, cv2.COLOR_BGR2HSV)
 
         text_y = 25
-        frame_img = frame.copy()
-        map_vertices = detect_map_corners(hsv)
-        if map_vertices is None:
+
+        undistorted_frame = cv2.undistort(frame, camera_matrix, distortion_coeffs, None, new_camera_matrix)
+        frame_img = undistorted_frame.copy()
+
+        corners, ids, rejected = detector.detectMarkers(undistorted_frame)
+
+        map_found, map_corners = detect_map(corners, ids)
+        if not map_found:
             cv2.putText(frame_img, 'Map not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 64, 192), lineType=cv2.LINE_AA)
             text_y += 20
@@ -63,19 +71,21 @@ def main():
             cv2.putText(frame_img, 'Map detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 192, 64), lineType=cv2.LINE_AA)
             text_y += 20
-            for vertex in map_vertices:
-                cv2.drawMarker(frame_img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS, thickness=2)
+            for corner in map_corners:
+                cv2.drawMarker(frame_img, position=corner.astype(np.int32), color=(0, 0, 255),
+                               markerType=cv2.MARKER_CROSS, thickness=2)
 
-            matrix = get_perspective_transform(map_vertices, dst_width, dst_height)
-            warped = cv2.warpPerspective(filtered_frame, matrix, (dst_width, dst_height))
+            matrix = get_perspective_transform(map_corners, dst_width, dst_height)
+            warped = cv2.warpPerspective(undistorted_frame, matrix, (dst_width, dst_height))
             warped_img = warped.copy()
 
         cv2.imshow('frame_img', frame_img)
 
-        hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
-        robot_vertices = detect_robot_vertices_old(hsv)
+        corners, ids, rejected = detector.detectMarkers(warped_img)
+
+        robot_found, robot_position, robot_direction = detect_robot(corners, ids)
         text_y = 25
-        if robot_vertices is None:
+        if not robot_found:
             cv2.putText(warped_img, 'Robot not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 64, 192), lineType=cv2.LINE_AA)
             text_y += 20
@@ -83,27 +93,31 @@ def main():
             cv2.putText(warped_img, 'Robot detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 192, 64), lineType=cv2.LINE_AA)
             text_y += 20
-            for vertex in robot_vertices:
-                cv2.drawMarker(warped_img, position=vertex, color=(0, 0, 255), markerType=cv2.MARKER_CROSS, thickness=2)
+
+            pos = robot_position.astype(np.int32)
+            tip = (robot_position + robot_direction).astype(np.int32)
+            cv2.line(warped_img, pos, tip, color=(0, 0, 255))
+            cv2.drawMarker(warped_img, position=pos, color=(0, 0, 255), markerSize=10,
+                           markerType=cv2.MARKER_CROSS)
 
             # FIXME: this is just a temporary hack
-            distance_center_back_px = np.abs(thymio.POINT_BACK[1]) / width_mm * dst_width
-            position_img, direction_img = get_robot_pose_old(robot_vertices, distance_center_back_px)
-            cv2.circle(warped_img, center=position_img.astype(np.int32), radius=4, color=(0, 255, 0), thickness=-1,
-                       lineType=cv2.LINE_AA)
-            cv2.arrowedLine(warped_img, position_img.astype(np.int32),
-                            (position_img + direction_img * 40).astype(np.int32),
-                            color=(0, 255, 0), thickness=2, line_type=cv2.LINE_AA, tipLength=0.5)
-            position_world = transform_affine(image_to_world, position_img)
-            thymio.pos_x = position_world[0]
-            thymio.pos_y = position_world[1]
-            thymio.theta = np.arctan2(-direction_img[0], -direction_img[1])
-            outline = thymio.get_outline().astype(np.int32)
-            outline = np.array([transform_affine(world_to_image, pt) for pt in outline], dtype=np.int32)
-            cv2.polylines(warped_img, [outline], isClosed=True, color=(0, 0, 255), thickness=2, lineType=cv2.LINE_AA)
+            # distance_center_back_px = np.abs(thymio.POINT_BACK[1]) / width_mm * dst_width
+            # position_img, direction_img = get_robot_pose_old(robot_vertices, distance_center_back_px)
+            # cv2.circle(warped_img, center=position_img.astype(np.int32), radius=4, color=(0, 255, 0), thickness=-1,
+            #           lineType=cv2.LINE_AA)
+            # cv2.arrowedLine(warped_img, position_img.astype(np.int32),
+            #                (position_img + direction_img * 40).astype(np.int32),
+            #                color=(0, 255, 0), thickness=2, line_type=cv2.LINE_AA, tipLength=0.5)
+            # position_world = transform_affine(image_to_world, position_img)
+            # thymio.pos_x = position_world[0]
+            # thymio.pos_y = position_world[1]
+            # thymio.theta = np.arctan2(-direction_img[0], -direction_img[1])
+            # outline = thymio.get_outline().astype(np.int32)
+            # outline = np.array([transform_affine(world_to_image, pt) for pt in outline], dtype=np.int32)
+            # cv2.polylines(warped_img, [outline], isClosed=True, color=(0, 0, 255), thickness=2, lineType=cv2.LINE_AA)
 
-        target = detect_target_old(hsv)
-        if target is None:
+        target_found, target_position = detect_target(corners, ids)
+        if not target_found:
             cv2.putText(warped_img, 'Target not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 64, 192), lineType=cv2.LINE_AA)
             text_y += 20
@@ -111,7 +125,8 @@ def main():
             cv2.putText(warped_img, 'Target detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 192, 64), lineType=cv2.LINE_AA)
             text_y += 20
-            cv2.drawMarker(warped_img, position=target, color=(255, 255, 255), markerType=cv2.MARKER_CROSS, thickness=2)
+            cv2.drawMarker(warped_img, position=target_position.astype(np.int32), color=(0, 255, 0), markerSize=10,
+                           markerType=cv2.MARKER_CROSS)
 
         cv2.imshow('warped_img', warped_img)
 
@@ -121,9 +136,6 @@ def main():
         elif key == ord('m'):
             graph_img = build_draw_graph(warped)
             cv2.imshow('graph', graph_img)
-        elif key == ord('s'):
-            cv2.imwrite('frame.png', frame)
-            print('Saved frame as frame.png')
 
     cap.release()
     cv2.destroyAllWindows()

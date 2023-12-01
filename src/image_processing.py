@@ -283,7 +283,25 @@ def detect_target_old(hsv: np.ndarray):
     return np.array([px, py])
 
 
-def detect_map_corners(hsv: np.ndarray):
+def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
+    """
+    Returns whether all map corners were detected and their position in image space
+    """
+
+    if marker_ids is not None and len(marker_ids) >= 4:
+        found = np.zeros(4, dtype=bool)
+        for marker_id in marker_ids:
+            if marker_id < 4:
+                found[marker_id] = True
+        if np.all(found):
+            print(marker_corners[:4])
+            corners = np.array(marker_corners[:4]).squeeze()
+            return True, corners
+
+    return False, np.zeros(2)
+
+
+def detect_map_old(hsv: np.ndarray):
     lower_blue = np.array([100, 100, 50])
     upper_blue = np.array([115, 200, 200])
     mask = cv2.inRange(hsv, lower_blue, upper_blue)
@@ -308,10 +326,3 @@ def detect_map_corners(hsv: np.ndarray):
 
     return vertices
 
-
-if __name__ == '__main__':
-    # correct_perspective()
-    # reconstruct_thymio()
-    # test_transforms()
-    # test_obstacle_mask()
-    pass
