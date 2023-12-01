@@ -7,15 +7,15 @@ def build_draw_graph(img):
     approx_poly_epsilon = 2
     obstacle_mask = get_obstacle_mask(img)
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
-    all_contours = [contour for region in regions for contour in region]
 
     free_space = np.empty_like(img)
     free_space[:] = (64, 64, 192)
+    all_contours = [contour for region in regions for contour in region]
     cv2.drawContours(free_space, all_contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
     img = cv2.addWeighted(img, 0.5, free_space, 0.5, 0.0)
     cv2.drawContours(img, all_contours, contourIdx=-1, color=(64, 64, 192))
 
-    graph = build_graph(all_contours)
+    graph = build_graph(regions)
     draw_graph(img, graph)
 
     return img
@@ -85,9 +85,7 @@ def main():
         corners, ids, rejected = detector.detectMarkers(warped_img)
 
         robot_found, robot_position, robot_direction = detect_robot(corners, ids)
-        print(f'Robot: found={robot_found}, position={robot_position}, direction={robot_direction}')
         target_found, target_position = detect_target(corners, ids)
-        print(f'Target: found={target_found}, position={target_position}')
 
         text_y = 25
         if not robot_found:
