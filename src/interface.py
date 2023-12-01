@@ -11,13 +11,11 @@ def main():
 
     demo.show_demo()
 
-    x = np.linspace(0, 1, 960)
-    y = np.linspace(0, 1, 720)
-    xv, yv = np.meshgrid(x, y)
-    z = np.dstack((np.sin(xv * 10) * np.cos(yv * 14) * 0.5 + 0.5, np.sin(xv * 5) * np.cos(yv * 4) * 0.5 + 0.5,
-                   np.sin(xv * 5) * np.cos(yv * 4) * 0.5 + 0.5, np.ones(xv.shape[0:2])))
     dpg.add_texture_registry(label="Texture Container", tag="__texture_container")
-    dpg.add_dynamic_texture(z.shape[1], z.shape[0], z.flatten().tolist(),
+    width = 640
+    height = 480
+    print(width * height)
+    dpg.add_dynamic_texture(width, height, np.zeros((height, width, 4), dtype=np.float32).flatten().tolist(),
                             parent="__texture_container", tag="__grid")
 
     with dpg.window(label="Main window", width=800, height=800, pos=(100, 100)):
@@ -27,8 +25,21 @@ def main():
 
     dpg.setup_dearpygui()
     dpg.show_viewport()
-    dpg.start_dearpygui()
 
+    while dpg.is_dearpygui_running():
+        if cap.isOpened():
+            ret, frame = cap.read()
+            rgba = np.empty((frame.shape[0], frame.shape[1], 4), dtype=np.float32)
+            rgba[:, :, 2::-1] = frame / 255.0
+            rgba[:, :, 3] = 1.0
+            if ret:
+                dpg.set_value("__grid", rgba.flatten().tolist())
+                cv2.imshow('main', frame)
+
+        dpg.render_dearpygui_frame()
+
+
+    cap.release()
     dpg.delete_item("__texture_container")
     dpg.destroy_context()
 

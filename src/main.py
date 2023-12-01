@@ -1,10 +1,20 @@
 import numpy as np
 import typing
+from threading import Timer
+import time
 
 from camera_calibration import *
 from global_map import *
 from parameters import *
 from image_processing import *
+
+g_is_running = True
+
+
+class RepeatTimer(Timer):
+    def run(self):
+        while not self.finished.wait(self.interval) and g_is_running:
+            self.function(*self.args, **self.kwargs)
 
 
 def build_static_graph(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
@@ -77,6 +87,14 @@ def main():
                                                            (map_width_px, map_height_px), 0,
                                                            (map_width_px, map_height_px))
 
+    global graph
+    global regions
+    global path
+    global source_position
+    global stored_target_position
+    global free_source
+    global free_target
+
     graph = None
     regions = None
     path = []
@@ -90,11 +108,24 @@ def main():
     target_radius_px = int((TARGET_RADIUS + 20) / map_width_mm * map_width_px)
     marker_size_px = int((MARKER_SIZE + 5) / map_width_mm * map_width_px)
 
-    while cap.isOpened():
+    def callback():
+        global g_is_running
+        global graph
+        global regions
+        global path
+        global source_position
+        global stored_target_position
+        global free_source
+        global free_target
+
+        if not cap.isOpened():
+            g_is_running = False
+            return
+
         ret, frame = cap.read()
         if not ret:
             print('Cannot read frame')
-            break
+            return
 
         cv2.undistort(frame, camera_matrix, distortion_coeffs, dst=frame_undistorted, newCameraMatrix=new_camera_matrix)
         img_undistorted[:] = frame_undistorted
@@ -154,6 +185,10 @@ def main():
             cv2.polylines(img_map, [outline], isClosed=True, color=(0, 0, 255), thickness=2,
                           lineType=cv2.LINE_AA)
 
+            path_world = np.array(
+                [transform_affine(world_to_image, graph.vertices[path[i]]) for i in range(1, len(path))])
+
+
         if not target_found:
             cv2.putText(img_map, 'Target not detected', org=(10, text_y),
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
@@ -175,7 +210,8 @@ def main():
 
         key = cv2.waitKey(1) & 0xff
         if key == 27:
-            break
+            g_is_running = False
+            return
         elif key == ord('m'):
             regions, graph = build_static_graph(frame_map,
                                                 dilation_radius_px,
@@ -195,6 +231,13 @@ def main():
 
         cv2.imshow('Undistorted frame', img_undistorted)
         cv2.imshow('Map', img_map)
+
+    timer = RepeatTimer(0.1, callback)
+    timer.start()
+
+    global g_is_running
+    while g_is_running:
+        time.sleep(1.0 / 30.0)
 
     cap.release()
     cv2.destroyAllWindows()
