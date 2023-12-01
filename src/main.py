@@ -2,13 +2,15 @@ import numpy as np
 
 from camera_calibration import *
 from global_map import *
+import parameters
 
 
-def build_static_graph(img: np.ndarray, dilation_size_px: int, robot_position: np.ndarray,
-                       target_position: np.ndarray) -> tuple[list[list[np.ndarray]], Graph]:
+def build_static_graph(img: np.ndarray, dilation_size_px: int, robot_position: np.ndarray, robot_radius_px: int,
+                       target_position: np.ndarray, target_radius_px: int) -> tuple[list[list[np.ndarray]], Graph]:
     # Note: the minimum distance to any obstacle is 'dilation_size_px - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    obstacle_mask = get_obstacle_mask(img, dilation_size_px, robot_position, target_position)
+    obstacle_mask = get_obstacle_mask(img, dilation_size_px, robot_position, robot_radius_px, target_position,
+                                      target_radius_px)
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
     graph = build_graph(regions)
     return regions, graph
@@ -74,8 +76,9 @@ def main():
     graph = None
     regions = None
 
-    dilation_size_mm = Thymio.RADIUS + 20
-    dilation_size_px = int(dilation_size_mm / map_width_mm * map_width_px)
+    dilation_size_px = int((Thymio.RADIUS + 20) / map_width_mm * map_width_px)
+    robot_radius_px = int((Thymio.RADIUS + 20) / map_width_mm * map_width_px)
+    target_radius_px = int((parameters.TARGET_RADIUS + 20) / map_width_mm * map_width_px)
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -164,7 +167,8 @@ def main():
         if key == 27:
             break
         elif key == ord('m'):
-            regions, graph = build_static_graph(frame_map, dilation_size_px)
+            regions, graph = build_static_graph(frame_map, dilation_size_px, robot_position, robot_radius_px,
+                                                target_position, target_radius_px)
 
         cv2.imshow('Undistorted frame', img_undistorted)
         cv2.imshow('Map', img_map)

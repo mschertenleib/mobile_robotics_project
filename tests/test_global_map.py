@@ -5,6 +5,31 @@ g_target = (120, 730)
 g_source = (200, 100)
 
 
+# NOTE: we don't use the get_obstacle_mask() from image_processing.py because that one also deals with masking out the
+# robot etc.
+def get_obstacle_mask(img: np.ndarray) -> np.ndarray:
+    """
+    Returns a binary obstacle mask of the given color image, where 1 represents an obstacle.
+    A border is also added.
+    """
+
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    threshold = 150
+    _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
+
+    # Create borders
+    img[:, 0] = 1
+    img[:, -1] = 1
+    img[0, :] = 1
+    img[-1, :] = 1
+
+    dilation_size_px = 50
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_size_px, dilation_size_px))
+    img = cv2.dilate(img, kernel)
+
+    return img
+
+
 def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray]):
     """
     Draw positive orientation as green, negative as red;
@@ -24,8 +49,7 @@ def main():
     # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
     approx_poly_epsilon = 2
     color_image = cv2.imread('../images/map_divided.png')
-    obstacle_mask = get_obstacle_mask(color_image, 50, np.full(shape=2, fill_value=10000),
-                                      np.full(shape=2, fill_value=10000))
+    obstacle_mask = get_obstacle_mask(color_image)
 
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
 

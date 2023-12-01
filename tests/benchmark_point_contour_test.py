@@ -1,6 +1,7 @@
 import timeit
 
 from global_map import *
+from test_global_map import get_obstacle_mask
 
 
 def main():

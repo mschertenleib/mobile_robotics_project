@@ -37,16 +37,22 @@ def get_perspective_transform(map_corners: np.ndarray, dst_width: int, dst_heigh
     return cv2.getPerspectiveTransform(pts_src, pts_dst)
 
 
-def get_obstacle_mask(img: np.ndarray, dilation_size_px: int, robot_position: np.ndarray,
-                      target_position: np.ndarray) -> np.ndarray:
+def get_obstacle_mask(img: np.ndarray, dilation_size_px: int, robot_position: np.ndarray, robot_radius_px: int,
+                      target_position: np.ndarray, target_radius_px: int) -> np.ndarray:
     """
     Returns a binary obstacle mask of the given color image, where 1 represents an obstacle.
     A border is also added.
     """
 
-    threshold = 150
+    threshold = 100
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel, dst=img, iterations=1)
+
+    cv2.circle(img, center=robot_position.astype(np.int32), radius=robot_radius_px, color=[0], thickness=-1)
+    cv2.circle(img, center=target_position.astype(np.int32), radius=target_radius_px, color=[0], thickness=-1)
 
     # Create borders
     img[:, 0] = 1
