@@ -95,14 +95,14 @@ def reconstruct_thymio():
     cv2.destroyAllWindows()
 
 
-def get_obstacle_mask(color_image: np.ndarray) -> np.ndarray:
+def get_obstacle_mask(img: np.ndarray, dilation_size_px: int) -> np.ndarray:
     """
-    Returns a binary obstacle mask of the given image, where 1 represents an obstacle. An obstacle border is added.
+    Returns a binary obstacle mask of the given color image, where 1 represents an obstacle.
+    A border is also added.
     """
 
     threshold = 100
-    kernel_size = 50
-    img = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
 
     # Create borders
@@ -111,11 +111,10 @@ def get_obstacle_mask(color_image: np.ndarray) -> np.ndarray:
     img[0, :] = 1
     img[-1, :] = 1
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_size_px, dilation_size_px))
     img = cv2.dilate(img, kernel)
 
     return img
-
 
 
 def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray], orientations: np.ndarray):
@@ -133,6 +132,25 @@ def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray], orien
             cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
+def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
+    """
+    Returns whether all map corners were detected and their position in image space.
+    The corners are ordered clockwise, starting from the top left.
+    """
+
+    if marker_ids is not None and len(marker_ids) >= 4:
+        marker_indices = []
+        for i in range(4):
+            index = np.argwhere(np.array(marker_ids) == i)
+            if len(index) == 1:
+                marker_indices.append(index.flatten().item(0))
+        if len(marker_indices) == 4:
+            corners = np.array(marker_corners)[marker_indices].squeeze()[:, 0]
+            return True, corners
+
+    return False, np.zeros(2)
+
+
 def detect_robot(marker_corners, marker_ids) -> tuple[bool, np.ndarray, np.ndarray]:
     """
     Returns whether the robot was detected, its position and its direction in image space
@@ -144,7 +162,6 @@ def detect_robot(marker_corners, marker_ids) -> tuple[bool, np.ndarray, np.ndarr
             corners = np.array(marker_corners)[marker_index.flatten().item(0)].squeeze()
             position = np.sum(corners, 0) / 4
             direction = (corners[0] + corners[1]) / 2 - (corners[2] + corners[3]) / 2
-            direction /= np.linalg.norm(direction)
             return True, position, direction
 
     return False, np.zeros(2), np.zeros(2)
@@ -161,24 +178,5 @@ def detect_target(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
             corners = np.array(marker_corners)[marker_index.flatten().item(0)].squeeze()
             position = np.sum(corners, 0) / 4
             return True, position
-
-    return False, np.zeros(2)
-
-
-def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
-    """
-    Returns whether all map corners were detected and their position in image space.
-    The corners are ordered clockwise, starting from the top left.
-    """
-
-    if marker_ids is not None and len(marker_ids) >= 4:
-        marker_indices = []
-        for i in range(4):
-            index = np.argwhere(np.array(marker_ids) == i)
-            if len(index) == 1:
-                marker_indices.append(index.flatten().item(0))
-        if len(marker_indices) == 4:
-            corners = np.array(marker_corners)[marker_indices].squeeze()[:, 0]
-            return True, corners
 
     return False, np.zeros(2)
