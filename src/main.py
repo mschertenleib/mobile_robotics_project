@@ -11,6 +11,10 @@ from kalman_filter import *
 
 g_is_running = True
 
+prev_x_est = np.zeros((3, 1))
+prev_P_est = 1000 * np.ones(3)
+prev_input = np.zeros(2)
+
 
 class RepeatTimer(Timer):
     def run(self):
@@ -111,10 +115,6 @@ def main():
     target_radius_px = int((TARGET_RADIUS + 20) / map_width_mm * map_width_px)
     marker_size_px = int((MARKER_SIZE + 5) / map_width_mm * map_width_px)
 
-    prev_x_est = np.zeros((3, 1))
-    prev_P_est = 1000 * np.ones(3)
-    prev_input = np.zeros(2)
-
     def callback():
         global g_is_running
         global graph
@@ -200,12 +200,14 @@ def main():
             path_world = np.array(
                 [transform_affine(world_to_image, graph.vertices[path[i]]) for i in range(1, len(path))])
 
-            measurements = np.array([robot_x, robot_y, robot_theta])
+            measurements = np.array([[robot_x], [robot_y], [robot_theta]])
             if loop_index == 0:
-                prev_x = measurements
+                prev_x_est[:] = measurements
             new_x_est, new_P_est = Algorithm_EKF(measurements, prev_x_est, prev_P_est, prev_input)
             prev_x_est = new_x_est
             prev_P_est = new_P_est
+
+            print(f'x={new_x_est}, Sigma={new_P_est}')
 
         if not target_found:
             cv2.putText(img_map, 'Target not detected', org=(10, text_y),
