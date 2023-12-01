@@ -170,6 +170,7 @@ def detect_robot(marker_corners, marker_ids) -> tuple[bool, np.ndarray, np.ndarr
             corners = np.array(marker_corners)[marker_index.flatten().item(0)].squeeze()
             position = np.sum(corners, 0) / 4
             direction = (corners[0] + corners[1]) / 2 - (corners[2] + corners[3]) / 2
+            direction /= np.linalg.norm(direction)
             return True, position, direction
 
     return False, np.zeros(2), np.zeros(2)
