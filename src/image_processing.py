@@ -1,6 +1,7 @@
-import cv2
-
 from robot import *
+import parameters
+
+import cv2
 
 
 def image_info(img: np.ndarray):
@@ -36,72 +37,14 @@ def get_perspective_transform(map_corners: np.ndarray, dst_width: int, dst_heigh
     return cv2.getPerspectiveTransform(pts_src, pts_dst)
 
 
-def correct_perspective():
-    img = cv2.imread('../images/perspective_box.jpg')
-    assert img is not None
-    dsize = (img.shape[1] // 8, img.shape[0] // 8)
-    img = cv2.resize(img, dsize)
-
-    pts_src = np.float32([[226, 173], [408, 273], [78, 275], [258, 424]])
-    dst_width = 146 * 4
-    dst_height = 126 * 4
-    pts_dst = np.float32([[0, 0], [dst_width, 0], [0, dst_height], [dst_width, dst_height]])
-    matrix = cv2.getPerspectiveTransform(pts_src, pts_dst)
-    inv_matrix = np.linalg.inv(matrix)
-
-    for pt in pts_src:
-        cv2.circle(img, center=pt.astype(int), radius=5, color=(0, 0, 255), thickness=-1)
-    center = transform_perspective(inv_matrix, [dst_width / 3, dst_height / 3]).astype(int)
-    cv2.circle(img, center=center, radius=5, color=(255, 0, 0), thickness=-1)
-    cv2.imshow('main', img)
-    cv2.waitKey(0)
-
-    img = cv2.warpPerspective(img, matrix, (dst_width, dst_height))
-    cv2.imshow('main', img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
-def reconstruct_thymio():
-    img = np.zeros((400, 400, 3), dtype=np.uint8)
-
-    width_mm = 500
-    height_mm = 500
-    image_to_world = get_image_to_world_matrix(img.shape[1], img.shape[0], width_mm, height_mm)
-    world_to_image = get_world_to_image_matrix(width_mm, height_mm, img.shape[1], img.shape[0])
-
-    back = np.int32([200, 140])
-    front_left = np.int32([180, 280])
-    front_right = np.int32([300, 250])
-    front_center = (front_left + front_right) // 2
-    direction = front_center - back
-
-    cv2.circle(img, center=back, radius=5, color=(0, 255, 0), thickness=-1)
-    cv2.circle(img, center=front_left, radius=5, color=(0, 255, 0), thickness=-1)
-    cv2.circle(img, center=front_right, radius=5, color=(0, 255, 0), thickness=-1)
-
-    thymio = Thymio(back[0], back[1], np.arctan2(direction[1], direction[0]))
-
-    robot_outline = thymio.get_outline()
-    robot_outline = np.array([robot_outline.T[0, :], robot_outline.T[1, :], np.ones(robot_outline.shape[0])])
-    robot_outline = (world_to_image @ robot_outline).T.astype(np.int32)
-    robot_pos = (world_to_image @ np.array([thymio.pos_x, thymio.pos_y, 1])).astype(np.int32)
-
-    cv2.polylines(img, [robot_outline], isClosed=True, color=(255, 255, 255), lineType=cv2.LINE_AA)
-    cv2.circle(img, center=robot_pos, radius=3, color=(255, 255, 255), thickness=-1, lineType=cv2.LINE_AA)
-
-    cv2.imshow('main', img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
-def get_obstacle_mask(img: np.ndarray, dilation_size_px: int) -> np.ndarray:
+def get_obstacle_mask(img: np.ndarray, dilation_size_px: int, robot_position: np.ndarray,
+                      target_position: np.ndarray) -> np.ndarray:
     """
     Returns a binary obstacle mask of the given color image, where 1 represents an obstacle.
     A border is also added.
     """
 
-    threshold = 100
+    threshold = 150
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
 
@@ -115,21 +58,6 @@ def get_obstacle_mask(img: np.ndarray, dilation_size_px: int) -> np.ndarray:
     img = cv2.dilate(img, kernel)
 
     return img
-
-
-def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray], orientations: np.ndarray):
-    """
-    Draw positive orientation as green, negative as red;
-    first vertex is black, last is white
-    """
-    img[:] = (192, 192, 192)
-    for c in range(len(contours)):
-        color = (64, 192, 64) if orientations[c] >= 0 else (64, 64, 192)
-        cv2.drawContours(img, [contours[c]], contourIdx=-1, color=color, thickness=3)
-        n_points = len(contours[c])
-        for i in range(n_points):
-            brightness = i / (n_points - 1) * 255
-            cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
 def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:

@@ -4,10 +4,11 @@ from camera_calibration import *
 from global_map import *
 
 
-def build_static_graph(img: np.ndarray, dilation_size_px: int) -> tuple[list[list[np.ndarray]], Graph]:
+def build_static_graph(img: np.ndarray, dilation_size_px: int, robot_position: np.ndarray,
+                       target_position: np.ndarray) -> tuple[list[list[np.ndarray]], Graph]:
     # Note: the minimum distance to any obstacle is 'dilation_size_px - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    obstacle_mask = get_obstacle_mask(img, dilation_size_px)
+    obstacle_mask = get_obstacle_mask(img, dilation_size_px, robot_position, target_position)
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
     graph = build_graph(regions)
     return regions, graph
