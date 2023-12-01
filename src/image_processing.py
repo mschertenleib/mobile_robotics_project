@@ -165,9 +165,9 @@ def detect_robot(marker_corners, marker_ids) -> tuple[bool, np.ndarray, np.ndarr
     """
 
     if marker_ids is not None and len(marker_ids) > 0:
-        marker_index = np.argwhere(marker_ids[0] == 4)
-        if len(marker_index) > 0:
-            corners = marker_corners[marker_index[0, 0]][0]
+        marker_index = np.argwhere(np.array(marker_ids).flatten() == 4)
+        if np.size(marker_index) == 1:
+            corners = np.array(marker_corners)[marker_index.flatten().item(0)].squeeze()
             position = np.sum(corners, 0) / 4
             direction = (corners[0] + corners[1]) / 2 - (corners[2] + corners[3]) / 2
             return True, position, direction
@@ -181,9 +181,9 @@ def detect_target(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
     """
 
     if marker_ids is not None and len(marker_ids) > 0:
-        marker_index = np.argwhere(marker_ids[0] == 5)
-        if len(marker_index) > 0:
-            corners = marker_corners[marker_index[0, 0]][0]
+        marker_index = np.argwhere(np.array(marker_ids).flatten() == 5)
+        if np.size(marker_index) == 1:
+            corners = np.array(marker_corners)[marker_index.flatten().item(0)].squeeze()
             position = np.sum(corners, 0) / 4
             return True, position
 

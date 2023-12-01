@@ -22,8 +22,8 @@ def build_draw_graph(img):
 
 
 def main():
-    dst_width = 594
-    dst_height = 420
+    dst_width = 841
+    dst_height = 594
     warped = np.zeros((dst_height, dst_width, 3), dtype=np.uint8)
     warped_img = warped.copy()
 
@@ -38,15 +38,17 @@ def main():
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
     detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
 
-    # camera_matrix, distortion_coeffs = calibrate_camera()
+    frame_width = 1280
+    frame_height = 720
+    # camera_matrix, distortion_coeffs = calibrate_camera(frame_width, frame_height)
     # store_to_json('camera.json', camera_matrix, distortion_coeffs)
     camera_matrix, distortion_coeffs = load_from_json('camera.json')
     new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs, (dst_width, dst_height), 0,
                                                            (dst_width, dst_height))
 
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -83,6 +85,10 @@ def main():
         corners, ids, rejected = detector.detectMarkers(warped_img)
 
         robot_found, robot_position, robot_direction = detect_robot(corners, ids)
+        print(f'Robot: found={robot_found}, position={robot_position}, direction={robot_direction}')
+        target_found, target_position = detect_target(corners, ids)
+        print(f'Target: found={target_found}, position={target_position}')
+
         text_y = 25
         if not robot_found:
             cv2.putText(warped_img, 'Robot not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
@@ -115,7 +121,6 @@ def main():
             # outline = np.array([transform_affine(world_to_image, pt) for pt in outline], dtype=np.int32)
             # cv2.polylines(warped_img, [outline], isClosed=True, color=(0, 0, 255), thickness=2, lineType=cv2.LINE_AA)
 
-        target_found, target_position = detect_target(corners, ids)
         if not target_found:
             cv2.putText(warped_img, 'Target not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=0.5, color=(64, 64, 192), lineType=cv2.LINE_AA)

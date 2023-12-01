@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 
-def calibrate_camera():
+def calibrate_camera(frame_width, frame_height):
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_50)
     board = cv2.aruco.CharucoBoard(size=(5, 7), squareLength=0.04, markerLength=0.02, dictionary=dictionary)
     # board_image = board.generateImage(outSize=(1000, 1400), marginSize=20, borderBits=1)
@@ -20,6 +20,8 @@ def calibrate_camera():
     all_image_points = []
 
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -48,7 +50,8 @@ def calibrate_camera():
     cv2.destroyAllWindows()
 
     ret_val, camera_matrix, distortion_coeffs, r_vecs, t_vecs = cv2.calibrateCamera(all_object_points, all_image_points,
-                                                                                    imageSize=(640, 480),
+                                                                                    imageSize=(
+                                                                                        frame_width, frame_height),
                                                                                     cameraMatrix=np.empty((3, 3)),
                                                                                     distCoeffs=np.empty(14))
 
