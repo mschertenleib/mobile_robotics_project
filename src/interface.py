@@ -14,7 +14,6 @@ def main():
     dpg.add_texture_registry(label="Texture Container", tag="__texture_container")
     width = 640
     height = 480
-    print(width * height)
     dpg.add_dynamic_texture(width, height, np.zeros((height, width, 4), dtype=np.float32).flatten().tolist(),
                             parent="__texture_container", tag="__grid")
 
@@ -34,10 +33,8 @@ def main():
             rgba[:, :, 3] = 1.0
             if ret:
                 dpg.set_value("__grid", rgba.flatten().tolist())
-                cv2.imshow('main', frame)
 
         dpg.render_dearpygui_frame()
-
 
     cap.release()
     dpg.delete_item("__texture_container")

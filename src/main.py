@@ -1,14 +1,11 @@
 import numpy as np
 import typing
+import asyncio
 from threading import Timer
 import time
-from controller import *
-
 from tdmclient import ClientAsync
-client = ClientAsync()
-node = await client.wait_for_node()
-await node.lock()
 
+from controller import *
 from camera_calibration import *
 from global_map import *
 from parameters import *
@@ -23,6 +20,7 @@ prev_input = np.zeros(2)
 
 switch = 0;
 sample_time = 0.1;
+
 
 class RepeatTimer(Timer):
     def run(self):
@@ -62,7 +60,11 @@ def get_robot_outline(x: float, y: float, theta: float) -> np.ndarray:
     return pos + (rot @ ROBOT_OUTLINE.T).T
 
 
-def main():
+async def main():
+    client = ClientAsync()
+    node = await client.wait_for_node()
+    await node.lock()
+
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     frame_width = 960
     frame_height = 720
@@ -210,9 +212,10 @@ def main():
             measurements = np.array([[robot_x], [robot_y], [robot_theta]])
             if loop_index == 0:
                 prev_x_est[:] = measurements
-                if len(path_world)!=0:
-                    dist_error = np.sqrt((path_world[0, 0]-measurements[0, 0])**2+(path_world[0, 1]-measurements[1, 0])**2)
-                    angle_error = np.rad2deg(path_world[0, 2]-measurements[2, 0])
+                if len(path_world) != 0:
+                    dist_error = np.sqrt(
+                        (path_world[0, 0] - measurements[0, 0]) ** 2 + (path_world[0, 1] - measurements[1, 0]) ** 2)
+                    angle_error = np.rad2deg(path_world[0, 2] - measurements[2, 0])
             new_x_est, new_P_est = Algorithm_EKF(measurements, prev_x_est, prev_P_est, prev_input)
             prev_x_est = new_x_est
             prev_P_est = new_P_est
@@ -220,7 +223,8 @@ def main():
             prev_x_est = prev_x_est.tolist()
             prev_x_est[2] = np.rad2deg(prev_x_est[2])
             goal_state = [path_world[0, 0], path_world[1, 0], np.rad2deg(path_world[2, 0])]
-            prev_input, angle_error, dist_error = control(prev_x_est, goal_state, switch, angle_error, dist_error, sample_time)
+            prev_input, angle_error, dist_error = control(prev_x_est, goal_state, switch, angle_error, dist_error,
+                                                          sample_time)
             node.set_send_variables(move_robot(prev_input[0], prev_input[1]))
 
             print(f'x={new_x_est}, Sigma={new_P_est}')
@@ -286,4 +290,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
