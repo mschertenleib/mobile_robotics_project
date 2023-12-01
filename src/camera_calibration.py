@@ -6,7 +6,7 @@ import numpy as np
 
 def calibrate_camera(frame_width, frame_height):
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_50)
-    board = cv2.aruco.CharucoBoard(size=(5, 7), squareLength=0.04, markerLength=0.02, dictionary=dictionary)
+    board = cv2.aruco.CharucoBoard(size=(5, 7), squareLength=39.1, markerLength=19.6, dictionary=dictionary)
     # board_image = board.generateImage(outSize=(1000, 1400), marginSize=20, borderBits=1)
     # cv2.imwrite('charuco_board.png', board_image)
     # return

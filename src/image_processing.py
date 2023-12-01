@@ -18,13 +18,13 @@ def transform_affine(matrix: np.ndarray, point: np.ndarray) -> np.ndarray:
     return transformed
 
 
-def get_image_to_world(width_px: int, height_px: int, width_mm: float, height_mm: float) -> np.ndarray:
+def get_image_to_world_matrix(width_px: int, height_px: int, width_mm: float, height_mm: float) -> np.ndarray:
     src = np.float32([[0, 0], [width_px, 0], [0, height_px]])
     dst = np.float32([[0, height_mm], [width_mm, height_mm], [0, 0]])
     return cv2.getAffineTransform(src, dst)
 
 
-def get_world_to_image(width_mm: float, height_mm: float, width_px: int, height_px: int) -> np.ndarray:
+def get_world_to_image_matrix(width_mm: float, height_mm: float, width_px: int, height_px: int) -> np.ndarray:
     src = np.float32([[0, height_mm], [width_mm, height_mm], [0, 0]])
     dst = np.float32([[0, 0], [width_px, 0], [0, height_px]])
     return cv2.getAffineTransform(src, dst)
@@ -67,8 +67,8 @@ def reconstruct_thymio():
 
     width_mm = 500
     height_mm = 500
-    image_to_world = get_image_to_world(img.shape[1], img.shape[0], width_mm, height_mm)
-    world_to_image = get_world_to_image(width_mm, height_mm, img.shape[1], img.shape[0])
+    image_to_world = get_image_to_world_matrix(img.shape[1], img.shape[0], width_mm, height_mm)
+    world_to_image = get_world_to_image_matrix(width_mm, height_mm, img.shape[1], img.shape[0])
 
     back = np.int32([200, 140])
     front_left = np.int32([180, 280])
