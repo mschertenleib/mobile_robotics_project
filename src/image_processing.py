@@ -30,18 +30,8 @@ def get_world_to_image(width_mm: float, height_mm: float, width_px: int, height_
     return cv2.getAffineTransform(src, dst)
 
 
-def get_perspective_transform(map_vertices: np.ndarray, dst_width: int, dst_height: int) -> np.ndarray:
-    pts_src = np.float32(map_vertices)
-    sorted_by_y = np.argsort(pts_src[:, 1])
-    top_points = pts_src[sorted_by_y[:2]]
-    top_sorted_by_x = np.argsort(top_points[:, 0])
-    top_left = top_points[top_sorted_by_x[0]]
-    top_right = top_points[top_sorted_by_x[1]]
-    bottom_points = pts_src[sorted_by_y[2:]]
-    bottom_sorted_by_x = np.argsort(bottom_points[:, 0])
-    bottom_left = bottom_points[bottom_sorted_by_x[0]]
-    bottom_right = bottom_points[bottom_sorted_by_x[1]]
-    pts_src = np.float32([top_left, top_right, bottom_right, bottom_left])
+def get_perspective_transform(map_corners: np.ndarray, dst_width: int, dst_height: int) -> np.ndarray:
+    pts_src = map_corners.astype(np.float32)
     pts_dst = np.float32([[0, 0], [dst_width, 0], [dst_width, dst_height], [0, dst_height]])
     return cv2.getPerspectiveTransform(pts_src, pts_dst)
 
@@ -169,67 +159,6 @@ def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray], orien
             cv2.circle(img, contours[c][i], color=(brightness, brightness, brightness), radius=5, thickness=-1)
 
 
-def detect_robot_vertices_old(hsv: np.ndarray):
-    lower_green = np.array([55, 50, 50])
-    upper_green = np.array([75, 255, 255])
-    mask = cv2.inRange(hsv, lower_green, upper_green)
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if len(contours) != 3:
-        return None
-
-    vertices = np.empty((len(contours), 2), dtype=np.int32)
-    for i in range(len(contours)):
-        moments = cv2.moments(contours[i])
-        if moments["m00"] == 0:
-            return None
-
-        px = np.int32(moments["m10"] / moments["m00"])
-        py = np.int32(moments["m01"] / moments["m00"])
-        vertices[i] = np.array([px, py])
-
-    return vertices
-
-
-def get_robot_pose_old(robot_vertices: np.ndarray, distance_center_back: float):
-    """
-    Compute the robot pose (position, direction) in image space from its three detected markers
-    """
-
-    lengths = np.empty(3)
-    for i in range(len(robot_vertices)):
-        vertex_1 = robot_vertices[i]
-        vertex_2 = robot_vertices[(i + 1) % len(robot_vertices)]
-        lengths[i] = np.linalg.norm(vertex_2 - vertex_1)
-
-    # The front edge is the smallest of the three
-    front_edge_index = np.argmin(lengths)
-
-    # For now assume the left vertex comes before the right vertex
-    left_index = front_edge_index
-    right_index = (front_edge_index + 1) % len(robot_vertices)
-    back_index = (front_edge_index + 2) % len(robot_vertices)
-    left_edge = robot_vertices[left_index] - robot_vertices[back_index]
-    right_edge = robot_vertices[right_index] - robot_vertices[back_index]
-    # Switch left and right if we realize we were wrong
-    if np.cross(left_edge, right_edge) < 0:
-        left_index, right_index = right_index, left_index
-
-    back = robot_vertices[back_index]
-    left = robot_vertices[left_index]
-    right = robot_vertices[right_index]
-    front_center = (left + right) / 2
-    direction = front_center - back
-    direction /= np.linalg.norm(direction)
-    position = back + distance_center_back * direction
-
-    return position, direction
-
-
 def detect_robot(marker_corners, marker_ids) -> tuple[bool, np.ndarray, np.ndarray]:
     """
     Returns whether the robot was detected, its position and its direction in image space
@@ -261,63 +190,20 @@ def detect_target(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
     return False, np.zeros(2)
 
 
-def detect_target_old(hsv: np.ndarray):
-    lower_pink = np.array([165, 50, 50])
-    upper_pink = np.array([175, 255, 255])
-    mask = cv2.inRange(hsv, lower_pink, upper_pink)
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if len(contours) != 1:
-        return None
-
-    moments = cv2.moments(contours[0])
-    if moments["m00"] == 0:
-        return None
-
-    px = np.int32(moments["m10"] / moments["m00"])
-    py = np.int32(moments["m01"] / moments["m00"])
-    return np.array([px, py])
-
-
 def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
     """
-    Returns whether all map corners were detected and their position in image space
+    Returns whether all map corners were detected and their position in image space.
+    The corners are ordered clockwise, starting from the top left.
     """
 
     if marker_ids is not None and len(marker_ids) >= 4:
-        marker_indices = np.argwhere(np.array(marker_ids).squeeze() < 4)
+        marker_indices = []
+        for i in range(4):
+            index = np.argwhere(np.array(marker_ids) == i)
+            if len(index) == 1:
+                marker_indices.append(index.flatten().item(0))
         if len(marker_indices) == 4:
-            top_left_corners = np.array(marker_corners)[marker_indices].squeeze()[:, 0]
-            return True, top_left_corners
+            corners = np.array(marker_corners)[marker_indices].squeeze()[:, 0]
+            return True, corners
 
     return False, np.zeros(2)
-
-
-def detect_map_old(hsv: np.ndarray):
-    lower_blue = np.array([100, 100, 50])
-    upper_blue = np.array([115, 200, 200])
-    mask = cv2.inRange(hsv, lower_blue, upper_blue)
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if len(contours) != 4:
-        return None
-
-    vertices = np.empty((len(contours), 2), dtype=np.int32)
-    for i in range(len(contours)):
-        moments = cv2.moments(contours[i])
-        if moments["m00"] == 0:
-            return None
-
-        px = np.int32(moments["m10"] / moments["m00"])
-        py = np.int32(moments["m01"] / moments["m00"])
-        vertices[i] = np.array([px, py])
-
-    return vertices
