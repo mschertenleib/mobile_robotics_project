@@ -282,6 +282,8 @@ def draw_path(img: np.ndarray, graph: Graph, path: list[int], source: np.ndarray
               target: np.ndarray, free_target: np.ndarray):
     vertices = [graph.vertices[v].astype(np.int32) for v in path]
     cv2.polylines(img, [np.array(vertices)], isClosed=False, color=(192, 64, 64), thickness=2)
+    for vertex in vertices:
+        cv2.circle(img, vertex.astype(np.int32), color=(64, 64, 192), radius=6, thickness=-1)
 
     cv2.line(img, source.astype(np.int32), free_source.astype(np.int32), color=(0, 0, 0), thickness=2)
     cv2.circle(img, free_source.astype(np.int32), color=(0, 0, 0), radius=6, thickness=-1)

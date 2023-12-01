@@ -30,13 +30,6 @@ def draw_static_graph(img: np.ndarray, graph: Graph, regions: list[list[np.ndarr
     draw_graph(img, graph)
 
 
-def build_draw_dynamic_graph(img: np.ndarray, graph: Graph, regions: list[list[np.ndarray]], source: np.ndarray,
-                             target: np.ndarray):
-    free_source, free_target = update_graph(graph, regions, source, target)
-    path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
-    draw_path(img, graph, path, source, free_source, target, free_target)
-
-
 def get_robot_outline(x: float, y: float, theta: float) -> np.ndarray:
     """
     Returns the robot outline in world space
@@ -86,6 +79,11 @@ def main():
 
     graph = None
     regions = None
+    path = []
+    source_position = np.zeros(2)
+    stored_target_position = np.zeros(2)
+    free_source = None
+    free_target = None
 
     dilation_radius_px = int((ROBOT_RADIUS + 10) / map_width_mm * map_width_px)
     robot_radius_px = int((ROBOT_RADIUS + 20) / map_width_mm * map_width_px)
@@ -172,14 +170,13 @@ def main():
 
         if graph is not None:
             draw_static_graph(img_map, graph, regions)
-            if robot_found and target_found:
-                build_draw_dynamic_graph(img_map, graph, regions, robot_position, target_position)
+            if free_source is not None and free_target is not None:
+                draw_path(img_map, graph, path, source_position, free_source, stored_target_position, free_target)
 
         key = cv2.waitKey(1) & 0xff
         if key == 27:
             break
         elif key == ord('m'):
-
             regions, graph = build_static_graph(frame_map,
                                                 dilation_radius_px,
                                                 robot_position if robot_found else None,
@@ -189,6 +186,12 @@ def main():
                                                 marker_size_px,
                                                 map_width_px,
                                                 map_height_px)
+        elif key == ord('u'):
+            if robot_found and target_found:
+                source_position = robot_position
+                stored_target_position = target_position
+                free_source, free_target = update_graph(graph, regions, source_position, stored_target_position)
+                path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
         cv2.imshow('Undistorted frame', img_undistorted)
         cv2.imshow('Map', img_map)
