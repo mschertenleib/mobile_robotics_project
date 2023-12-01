@@ -27,8 +27,8 @@ def main():
     warped = np.zeros((dst_height, dst_width, 3), dtype=np.uint8)
     warped_img = warped.copy()
 
-    width_mm = 1189 - 2 * 25
-    height_mm = 841 - 2 * 25
+    width_mm = 1189
+    height_mm = 841
     image_to_world = get_image_to_world(dst_width, dst_height, width_mm, height_mm)
     world_to_image = get_world_to_image(width_mm, height_mm, dst_width, dst_height)
 
@@ -38,10 +38,9 @@ def main():
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
     detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
 
-    camera_matrix, distortion_coeffs = calibrate_camera()
-    json_filename = 'camera.json'
-    store_to_json(json_filename, camera_matrix, distortion_coeffs)
-    camera_matrix, distortion_coeffs = load_from_json(json_filename)
+    # camera_matrix, distortion_coeffs = calibrate_camera()
+    # store_to_json('camera.json', camera_matrix, distortion_coeffs)
+    camera_matrix, distortion_coeffs = load_from_json('camera.json')
     new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs, (dst_width, dst_height), 0,
                                                            (dst_width, dst_height))
 

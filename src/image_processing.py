@@ -289,14 +289,10 @@ def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
     """
 
     if marker_ids is not None and len(marker_ids) >= 4:
-        found = np.zeros(4, dtype=bool)
-        for marker_id in marker_ids:
-            if marker_id < 4:
-                found[marker_id] = True
-        if np.all(found):
-            print(marker_corners[:4])
-            corners = np.array(marker_corners[:4]).squeeze()
-            return True, corners
+        marker_indices = np.argwhere(np.array(marker_ids).squeeze() < 4)
+        if len(marker_indices) == 4:
+            top_left_corners = np.array(marker_corners)[marker_indices].squeeze()[:, 0]
+            return True, top_left_corners
 
     return False, np.zeros(2)
 
@@ -325,4 +321,3 @@ def detect_map_old(hsv: np.ndarray):
         vertices[i] = np.array([px, py])
 
     return vertices
-

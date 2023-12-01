@@ -44,6 +44,9 @@ def calibrate_camera():
         if key & 0xff == ord('s'):
             cv2.imwrite('test.png', frame)
 
+    cap.release()
+    cv2.destroyAllWindows()
+
     ret_val, camera_matrix, distortion_coeffs, r_vecs, t_vecs = cv2.calibrateCamera(all_object_points, all_image_points,
                                                                                     imageSize=(640, 480),
                                                                                     cameraMatrix=np.empty((3, 3)),
