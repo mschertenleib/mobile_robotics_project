@@ -117,32 +117,6 @@ def get_obstacle_mask(color_image: np.ndarray) -> np.ndarray:
     return img
 
 
-def test_transforms():
-    # Transformations we need:
-    # - original image -> perspective corrected
-    # -     detect the thymio in that space: (x, y, theta) in image space (left-handed system!)
-    # - perspective corrected image space -> world space: simple affine transform (pixels -> mm)
-    # - use the world space for everything else (graph, thymio position to send to filter)
-    # Well, actually it would be much better to build the graph in image space
-    #  -> integer coordinates -> exact equality tests
-
-    width_px = 800
-    height_px = 800
-    width_mm = 1000
-    height_mm = 1000
-
-    # NOTE: this switches from left-handed to right-handed, maybe too confusing
-    M = get_image_to_world(width_px, height_px, width_mm, height_mm)
-
-    def print_transform(matrix, pt):
-        print(f'{pt} -> {transform_affine(matrix, pt)}')
-
-    print_transform(M, (0, 0))
-    print_transform(M, (width_px, 0))
-    print_transform(M, (0, height_px))
-    print_transform(M, (width_px, height_px))
-    print_transform(M, (width_px // 4, height_px // 4))
-
 
 def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray], orientations: np.ndarray):
     """

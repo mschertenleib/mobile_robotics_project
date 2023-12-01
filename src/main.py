@@ -34,15 +34,15 @@ def build_draw_dynamic_graph(img: np.ndarray, graph: Graph, regions: list[list[n
 
 
 def main():
-    dst_width = 841
-    dst_height = 594
-    warped = np.zeros((dst_height, dst_width, 3), dtype=np.uint8)
+    width_px = 841
+    height_px = 594
+    warped = np.zeros((height_px, width_px, 3), dtype=np.uint8)
     warped_img = warped.copy()
 
     width_mm = 1189 - 25
     height_mm = 841 - 25
-    image_to_world = get_image_to_world(dst_width, dst_height, width_mm, height_mm)
-    world_to_image = get_world_to_image(width_mm, height_mm, dst_width, dst_height)
+    image_to_world = get_image_to_world(width_px, height_px, width_mm, height_mm)
+    world_to_image = get_world_to_image(width_mm, height_mm, width_px, height_px)
 
     thymio = Thymio()
 
@@ -56,8 +56,8 @@ def main():
     # store_to_json('camera.json', camera_matrix, distortion_coeffs)
     # return
     camera_matrix, distortion_coeffs = load_from_json('camera.json')
-    new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs, (dst_width, dst_height), 0,
-                                                           (dst_width, dst_height))
+    new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs, (width_px, height_px), 0,
+                                                           (width_px, height_px))
 
     graph = None
     regions = None
@@ -93,8 +93,8 @@ def main():
                 cv2.drawMarker(frame_img, position=corner.astype(np.int32), color=(0, 0, 255),
                                markerType=cv2.MARKER_CROSS, thickness=2)
 
-            matrix = get_perspective_transform(map_corners, dst_width, dst_height)
-            warped = cv2.warpPerspective(undistorted_frame, matrix, (dst_width, dst_height))
+            matrix = get_perspective_transform(map_corners, width_px, height_px)
+            warped = cv2.warpPerspective(undistorted_frame, matrix, (width_px, height_px))
             warped_img = warped.copy()
 
         cv2.imshow('frame_img', frame_img)
