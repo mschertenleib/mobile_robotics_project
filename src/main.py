@@ -95,6 +95,7 @@ def main():
     global stored_target_position
     global free_source
     global free_target
+    global loop_index
 
     graph = None
     regions = None
@@ -103,6 +104,7 @@ def main():
     stored_target_position = np.zeros(2)
     free_source = None
     free_target = None
+    loop_index = 0
 
     dilation_radius_px = int((ROBOT_RADIUS + 10) / map_width_mm * map_width_px)
     robot_radius_px = int((ROBOT_RADIUS + 20) / map_width_mm * map_width_px)
@@ -125,6 +127,7 @@ def main():
         global prev_x_est
         global prev_P_est
         global prev_input
+        global loop_index
 
         if not cap.isOpened():
             g_is_running = False
@@ -132,6 +135,7 @@ def main():
 
         ret, frame = cap.read()
         if not ret:
+            g_is_running = False
             print('Cannot read frame')
             return
 
@@ -197,6 +201,8 @@ def main():
                 [transform_affine(world_to_image, graph.vertices[path[i]]) for i in range(1, len(path))])
 
             measurements = np.array([robot_x, robot_y, robot_theta])
+            if loop_index == 0:
+                prev_x = measurements
             new_x_est, new_P_est = Algorithm_EKF(measurements, prev_x_est, prev_P_est, prev_input)
             prev_x_est = new_x_est
             prev_P_est = new_P_est
@@ -243,6 +249,8 @@ def main():
 
         cv2.imshow('Undistorted frame', img_undistorted)
         cv2.imshow('Map', img_map)
+
+        loop_index += 1
 
     timer = RepeatTimer(0.1, callback)
     timer.start()
