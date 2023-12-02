@@ -12,14 +12,6 @@ from parameters import *
 from image_processing import *
 from kalman_filter import *
 
-
-
-class Navigator(Timer):
-    def run(self):
-        while not self.finished.wait(self.interval):
-            self.function(*self.args, **self.kwargs)
-
-
 g_is_running = True
 
 prev_x_est = np.zeros((3, 1))

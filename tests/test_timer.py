@@ -1,44 +1,31 @@
-from threading import Timer
 import time
-import cv2
-
-
-g_is_running = True
+from threading import Timer
 
 
 class RepeatTimer(Timer):
     def run(self):
-        while not self.finished.wait(self.interval) and g_is_running:
+        while not self.finished.wait(self.interval):
             self.function(*self.args, **self.kwargs)
 
 
+class X:
+    def __init__(self):
+        self.x = 42
+
+
+def callback(x):
+    print(f'{x.x = }')
+    x.x += 1
+
+
 def main():
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-
-    def callback():
-        global g_is_running
-
-        if not cap.isOpened():
-            g_is_running = False
-
-        ret, frame = cap.read()
-        if ret:
-            cv2.imshow('Frame', frame)
-        else:
-            print('Cannot read frame')
-
-        if cv2.waitKey(1) & 0xff == 27:
-            g_is_running = False
-
-    timer = RepeatTimer(1 / 30.0, callback)
+    x = X()
+    timer = RepeatTimer(0.5, callback, args=[x])
     timer.start()
-
-    global g_is_running
-    while g_is_running:
-        time.sleep(1.0 / 60.0)
-
-    cap.release()
-    cv2.destroyAllWindows()
+    time.sleep(2)
+    x.x = -17
+    time.sleep(2)
+    timer.cancel()
 
 
 if __name__ == '__main__':
