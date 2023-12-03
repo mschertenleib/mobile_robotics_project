@@ -142,3 +142,44 @@ def control2(state, goal_state, switch, previous_angle_error, previous_dist_erro
     u = [u_r, u_l]
 
     return u, switch, angle_error, dist_error
+
+def astolfi_control(state, goal_state):
+    Kp=4  #>0
+    Ka=25  # > kp
+    Kb=-10 #<0
+    l = 48;
+    r = 22;
+
+    state[2] = np.deg2rad(state[2]);
+
+    delta_x = goal_state[0]-state[0];
+    delta_y = goal_state[1]-state[1];
+    reference_angle = np.arctan2(delta_x, delta_y);
+
+    rho = np.sqrt(delta_x**2+delta_y**2);
+    alpha = reference_angle-state[2];
+    beta = -state[2]-alpha;
+
+    v = Kp*rho;
+    omega = Ka*alpha+Kb*beta;
+
+    u_r =(l*omega+v)/r;
+    u_l =(v-l*omega)/r;
+
+    state[2] = np.rad2deg(state[2]);
+
+    speed_threshold = 80;
+    if (abs(u_r)>speed_threshold):
+        if (u_r>0):
+            u_r = speed_threshold;
+        elif (u_r<0):
+            u_r = -speed_threshold;
+    if (abs(u_l)>speed_threshold):
+        if (u_l>0):
+            u_l = speed_threshold;
+        elif (u_l<0):
+            u_l = -speed_threshold;
+
+    u = [u_r, u_l];
+
+    return u
