@@ -1,4 +1,5 @@
 import asyncio
+import time
 from threading import Timer
 
 from tdmclient import ClientAsync
@@ -47,8 +48,12 @@ class Navigator:
 
 class RepeatTimer(Timer):
     def run(self):
-        while not self.finished.wait(self.interval):
+        wait_time = self.interval
+        while not self.finished.wait(wait_time):
+            time_start_function = time.time()
             self.function(*self.args, **self.kwargs)
+            time_end_function = time.time()
+            wait_time = self.interval - (time_end_function - time_start_function)
 
 
 def build_static_graph(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
@@ -83,7 +88,15 @@ def get_robot_outline(x: float, y: float, theta: float) -> np.ndarray:
     return pos + (rot @ ROBOT_OUTLINE.T).T
 
 
+last_update = 0
+
+
 def run_navigation(nav: Navigator):
+    global last_update
+    now = time.time_ns()
+    print((now - last_update) / 1e6)
+    last_update = now
+
     nav.img_map[:] = nav.frame_map
 
     corners, ids, rejected = nav.detector.detectMarkers(nav.frame_map)

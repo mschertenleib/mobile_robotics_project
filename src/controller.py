@@ -38,25 +38,30 @@ def control(state, goal_state, switch, previous_angle_error, previous_dist_error
     robot_orientation = np.deg2rad(state[2])
     goal_angle = np.deg2rad(angle_target)
 
-    angle_threshold = 2
+    angle_threshold = 0.5
     linear_threshold = 10
 
-    if (abs(angle_error) > angle_threshold) and (switch == 0):
+    if abs(dist_error_integral) < linear_threshold:
+        return [0, 0], switch, angle_error, dist_error
+
+    if abs(angle_error) > angle_threshold:
+        switch = 0
+    else:
+        switch = 1
+
+    if switch == 0:
         u_r = K_p_angle * angle_error + K_i_angle * angle_error_integral + K_d_angle * angle_error_derivative
         u_l = -(K_p_angle * angle_error + K_i_angle * angle_error_integral + K_d_angle * angle_error_derivative)
         # print(angle_error, angle_error_integral, angle_error_derivative)
     else:
-        switch = 1
-        u_r = 0
-        u_l = 0
-
-    if (abs(dist_error_integral) > linear_threshold) and (switch == 1):
         # print(dist_error)
         u_r = K_p_dist * dist_error + K_i_dist * dist_error_integral + K_d_dist * dist_error_derivative
         u_l = K_p_dist * dist_error + K_i_dist * dist_error_integral + K_d_dist * dist_error_derivative
+        #u_r += K_p_angle * angle_error + K_i_angle * angle_error_integral + K_d_angle * angle_error_derivative
+        #u_l += -(K_p_angle * angle_error + K_i_angle * angle_error_integral + K_d_angle * angle_error_derivative)
         # print(dist_error, dist_error_integral, dist_error_derivative)
 
-    speed_threshold = 80
+    speed_threshold = 40
     if abs(u_r) > speed_threshold:
         if u_r > 0:
             u_r = speed_threshold
@@ -69,6 +74,7 @@ def control(state, goal_state, switch, previous_angle_error, previous_dist_error
             u_l = -speed_threshold
 
     u = [u_r, u_l]
+    print(u)
 
     return u, switch, angle_error, dist_error
 
@@ -117,6 +123,10 @@ def control2(state, goal_state, switch, previous_angle_error, previous_dist_erro
         u_l = K_p_dist * dist_error  # + K_i_dist * dist_error_integral + K_d_dist * dist_error_derivative
         u_l += -(K_p_angle * angle_error)
         # print(dist_error, dist_error_integral, dist_error_derivative)
+    else:
+        switch = 0
+        u_r = 0
+        u_l = 0
 
     speed_threshold = 80
     if abs(u_r) > speed_threshold:
