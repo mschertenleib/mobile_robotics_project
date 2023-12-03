@@ -54,7 +54,6 @@ class Navigator:
         self.angle_error = 0.0
         self.dist_error = 0.0
         self.switch = 0
-        self.sample_time = 0.1  # FIXME: this should be a global constant
 
 
 class RepeatTimer(Timer):
@@ -178,13 +177,13 @@ def main_callback(nav: Navigator):
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
 
-        if len(nav.path_world) != 0:
+        if nav.path_world is not None and len(nav.path_world) != 0:
             nav.prev_x_est = nav.prev_x_est.tolist()
             nav.prev_x_est[2] = np.rad2deg(nav.prev_x_est[2])
             goal_state = [nav.path_world[0, 0], nav.path_world[1, 0], np.rad2deg(nav.path_world[2, 0])]
             nav.prev_input, nav.switch, nav.angle_error, nav.dist_error = control(nav.prev_x_est, goal_state,
                                                                                   nav.switch, nav.angle_error,
-                                                                                  nav.dist_error, nav.sample_time)
+                                                                                  nav.dist_error, SAMPLING_TIME)
             nav.prev_x_est = np.array(nav.prev_x_est)
             nav.prev_x_est[2] = np.deg2rad(nav.prev_x_est[2])
             nav.node.send_set_variables(move_robot(nav.prev_input[0], nav.prev_input[1]))
@@ -247,10 +246,6 @@ def main_callback(nav: Navigator):
 async def main():
     nav = Navigator()
 
-    client = ClientAsync()
-    nav.node = await client.wait_for_node()
-    await nav.node.lock()
-
     nav.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     frame_width = 960
     frame_height = 720
@@ -295,16 +290,22 @@ async def main():
     nav.target_radius_px = int((TARGET_RADIUS + 20) / map_width_mm * map_width_px)
     nav.marker_size_px = int((MARKER_SIZE + 5) / map_width_mm * map_width_px)
 
+    client = ClientAsync()
+    nav.node = await client.wait_for_node()
+    await nav.node.lock()
+
     timer = RepeatTimer(0.1, main_callback, args=[nav])
     timer.start()
 
     while nav.is_running:
         time.sleep(1.0 / 30.0)
 
-    nav.cap.release()
-    cv2.destroyAllWindows()
+    timer.cancel()
 
     await nav.node.unlock()
+
+    nav.cap.release()
+    cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':

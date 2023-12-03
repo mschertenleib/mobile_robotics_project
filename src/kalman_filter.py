@@ -1,5 +1,7 @@
 import numpy as np
 
+from parameters import *
+
 thymio_data = [{'ground': [177, 496], 'sensor': [177, 496], 'left_speed': 0, 'right_speed': 65535},
                {'ground': [178, 495], 'sensor': [178, 495], 'left_speed': 0, 'right_speed': 65535},
                {'ground': [177, 495], 'sensor': [177, 495], 'left_speed': 0, 'right_speed': 65535},
@@ -304,11 +306,9 @@ std_speed = np.std([x / thymio_speed_to_ms for x in avg_speed[55:]])
 q_nu = std_speed / 2  # variance on speed state
 r_nu = std_speed / 2  # variance on speed measurement
 
-Ts = 0.1
-
 # Variance on position state and measurement
-qp = q_nu * Ts  # 0.04 # variance on position state
-rp = r_nu * Ts  # 0.25 # variance on position measurement
+qp = q_nu * SAMPLING_TIME  # 0.04 # variance on position state
+rp = r_nu * SAMPLING_TIME  # 0.25 # variance on position measurement
 q_theta = 0.1  # variance on angle orientation state
 r_theta = 0.1  # variance on angle orientation measurement
 
@@ -331,11 +331,11 @@ def Algorithm_EKF(measurements, mu_km, sig_km, u_k):
     ## Prediction through the a priori estimate
     # estimated mean of the state
     mu_k_pred = np.array([[0.0], [0.0], [0.0]])
-    mu_k_pred[0] = mu_km[0, 0] + (u_k[0] + u_k[1]) / 2 * R_w * Ts * np.sin \
-        (mu_km[2, 0] + (u_k[0] - u_k[1]) / d * R_w * Ts)
-    mu_k_pred[1] = mu_km[1, 0] + (u_k[0] + u_k[1]) / 2 * R_w * Ts * np.cos(
-        mu_km[2, 0] + (u_k[0] - u_k[1]) / d * R_w * Ts)
-    mu_k_pred[2] = mu_km[2, 0] + (u_k[0] - u_k[1]) / d * R_w * Ts
+    mu_k_pred[0] = mu_km[0, 0] + (u_k[0] + u_k[1]) / 2 * R_w * SAMPLING_TIME * np.sin \
+        (mu_km[2, 0] + (u_k[0] - u_k[1]) / d * R_w * SAMPLING_TIME)
+    mu_k_pred[1] = mu_km[1, 0] + (u_k[0] + u_k[1]) / 2 * R_w * SAMPLING_TIME * np.cos(
+        mu_km[2, 0] + (u_k[0] - u_k[1]) / d * R_w * SAMPLING_TIME)
+    mu_k_pred[2] = mu_km[2, 0] + (u_k[0] - u_k[1]) / d * R_w * SAMPLING_TIME
 
     # Jacobian of the motion model
     G_k = np.eye(3)
