@@ -41,7 +41,9 @@ class Navigator:
         self.stored_target_position = np.zeros(2)
         self.free_target_position = np.zeros(2)
         self.prev_x_est = np.zeros((3, 1))
-        self.prev_P_est = 1000 * np.ones(3)
+        self.prev_P_est = [[[ 4.12148917e-02, -1.07933653e-04,  4.21480900e-04], # 'straight line P_est convergence'
+                            [-1.07933653e-04,  4.04040766e-02, -5.94141187e-05],
+                            [ 4.21480900e-04, -5.94141187e-05,  3.06223793e-02]]]
         self.prev_input = np.zeros(2)
         self.angle_error = 0.0
         self.dist_error = 0.0
