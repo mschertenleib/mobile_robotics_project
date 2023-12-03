@@ -10,6 +10,7 @@ from global_map import *
 from image_processing import *
 from kalman_filter import *
 from parameters import *
+from locnavig import *
 
 
 class Navigator:
@@ -51,6 +52,24 @@ class Navigator:
         self.switch = 0
 
 
+class LocalNavigator:
+    def __init__(self, client, node):
+        self.client = client
+        self.node = node
+        self.spped_gain = 2
+        self.motor_speed = 100  # speed of the robot
+        self.LTobst = 5  # low obstacle threshold to switch state 1->0
+        self.HTobst = 13  # high obstacle threshold to switch state 0->1
+        self.obst_gain = 15  # /100 (actual gain: 15/100=0.15)
+        self.state = 0  # Actual state of the robot: 0->global navigation, 1->obstacle avoidance
+        self.case = 0  # Actual case of obstacle avoidance: 0-> left obstacle, 1-> right obstacle, 2-> obstacle in front
+        # we randomly generate the first bypass choice of the robot when he encounters an obstacle in front of him
+        self.side = bool(np.random.randint(2))
+        self.rotation_time = 1  # 1ms time before rotation
+        self.step_back_time = 1  # 1ms time during which i step back
+        self.prox_horizontal = [0] * 5
+
+
 class RepeatTimer(Timer):
     def run(self):
         wait_time = self.interval
@@ -59,6 +78,8 @@ class RepeatTimer(Timer):
             self.function(*self.args, **self.kwargs)
             time_end_function = time.time()
             wait_time = self.interval - (time_end_function - time_start_function)
+
+
 
 
 def build_static_graph(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
@@ -180,6 +201,17 @@ def run_navigation(nav: Navigator):
     cv2.waitKey(1)
 
 
+def run_local_navigation(loc_nav: LocalNavigator):
+    prox_horizontal = [0] * 5
+    for i in range(5):
+        prox_horizontal[i] = list(loc_nav.node.v.prox.horizontal)[i]
+    obst = [prox_horizontal[0], prox_horizontal[1], prox_horizontal[2], prox_horizontal[3], prox_horizontal[4]]
+
+    asyncio.run(avoid_obstacles(loc_nav.node, loc_nav.client, loc_nav.state, loc_nav.side, obst, loc_nav.HTobst,
+                          loc_nav.LTobst, loc_nav.motor_speed, loc_nav.step_back_time, loc_nav.spped_gain,
+                          loc_nav.rotation_time))
+
+
 async def main():
     nav = Navigator()
 
@@ -248,6 +280,10 @@ async def main():
     timer = RepeatTimer(SAMPLING_TIME, run_navigation, args=[nav])
     timer.start()
 
+    loc_nav = LocalNavigator(client, nav.node)
+    local_nav_timer = RepeatTimer(0.1, run_local_navigation, args=[loc_nav])
+    local_nav_timer.start()
+
     while cap.isOpened():
         await client.sleep(0.01)
 
@@ -308,6 +344,7 @@ async def main():
                     nav.path_index = 0
 
     timer.cancel()
+    local_nav_timer.cancel()
 
     await nav.node.stop()
     await nav.node.unlock()
