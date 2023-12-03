@@ -130,9 +130,9 @@ def run_navigation(nav: Navigator):
                 nav.angle_error = np.rad2deg(nav.path_world[0, 2] - measurements[2, 0])
             nav.first_estimate = False
 
-        speed_left = int(nav.node.v.motor.left.speed)
-        speed_right = int(nav.node.v.motor.right.speed)
-        # print(f'{speed_left = }, {speed_right = }')
+        speed_left = int(nav.node["motor.left.speed"])
+        speed_right = int(nav.node["motor.right.speed"])
+        print(f'{speed_left = }, {speed_right = }')
         new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, nav.prev_input)
         # new_x_est, new_P_est = measurements, nav.prev_P_est
         nav.prev_x_est = new_x_est
