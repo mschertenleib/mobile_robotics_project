@@ -139,7 +139,6 @@ def run_navigation(nav: Navigator):
 
         prev_input = np.array([speed_left * MMS_PER_MOTOR_SPEED, speed_right * MMS_PER_MOTOR_SPEED])
         new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, prev_input)
-        # new_x_est, new_P_est = measurements, nav.prev_P_est
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
 
@@ -227,7 +226,7 @@ async def main():
 
     dilation_radius_px = int((ROBOT_RADIUS + 10) / map_width_mm * map_width_px)
     robot_radius_px = int((ROBOT_RADIUS + 20) / map_width_mm * map_width_px)
-    target_radius_px = int((TARGET_RADIUS + 20) / map_width_mm * map_width_px)
+    target_radius_px = int((TARGET_RADIUS + 10) / map_width_mm * map_width_px)
     marker_size_px = int((MARKER_SIZE + 5) / map_width_mm * map_width_px)
 
     client = ClientAsync()
