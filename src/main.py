@@ -30,6 +30,7 @@ class Navigator:
         self.graph = None
         self.path_image: list[int] = []
         self.path_world = None
+        self.path_index = 0
         self.robot_found = False
         self.robot_position = None
         self.robot_direction = None
@@ -93,7 +94,7 @@ def run_navigation(nav: Navigator):
     now = time.time()
     delta_t = now - nav.last_sample_time
     nav.last_sample_time = now
-    print(f'Delta T = {delta_t} seconds')
+    # print(f'Delta T = {delta_t} seconds')
 
     nav.img_map[:] = nav.frame_map
 
@@ -114,6 +115,7 @@ def run_navigation(nav: Navigator):
         robot_x = robot_position_world.item(0)
         robot_y = robot_position_world.item(1)
         robot_theta = np.arctan2(-nav.robot_direction[0], -nav.robot_direction[1])
+
         outline = get_robot_outline(robot_x, robot_y, robot_theta).astype(np.int32)
         outline = np.array([transform_affine(nav.world_to_image, pt) for pt in outline], dtype=np.int32)
         cv2.polylines(nav.img_map, [outline], isClosed=True, color=(0, 0, 255), thickness=2,
@@ -130,9 +132,9 @@ def run_navigation(nav: Navigator):
 
         speed_left = int(nav.node.v.motor.left.speed)
         speed_right = int(nav.node.v.motor.right.speed)
-        print(f'{speed_left = }, {speed_right = }')
-        # new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, nav.prev_input)
-        new_x_est, new_P_est = measurements, nav.prev_P_est
+        # print(f'{speed_left = }, {speed_right = }')
+        new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, nav.prev_input)
+        # new_x_est, new_P_est = measurements, nav.prev_P_est
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
 
@@ -142,19 +144,20 @@ def run_navigation(nav: Navigator):
         cv2.polylines(nav.img_map, [outline], isClosed=True, color=(192, 64, 64), thickness=2,
                       lineType=cv2.LINE_AA)
 
-        if nav.path_world is not None and len(nav.path_world) != 0:
+        if nav.path_world is not None and len(nav.path_world) != 0 and nav.path_index < len(nav.path_world):
             nav.prev_x_est = nav.prev_x_est.tolist()
-            nav.prev_x_est[2] = np.rad2deg(nav.prev_x_est[2])
-            goal_state = [nav.path_world[0, 0], nav.path_world[0, 1], np.rad2deg(nav.path_world[0, 2])]
-            nav.prev_input, nav.switch, nav.angle_error, nav.dist_error = control(nav.prev_x_est, goal_state,
-                                                                                  nav.switch, nav.angle_error,
-                                                                                  nav.dist_error, SAMPLING_TIME)
+            goal_state = [nav.path_world[nav.path_index, 0], nav.path_world[nav.path_index, 1]]
+
+            input_left, input_right, goal_reached = astolfi_control(np.array(nav.prev_x_est).flatten(), goal_state)
+            if goal_reached:
+                nav.path_index += 1
+
+            nav.prev_input[:] = input_left, input_right
             nav.prev_x_est = np.array(nav.prev_x_est)
-            nav.prev_x_est[2] = np.deg2rad(nav.prev_x_est[2])
             mms_per_motor_speed = 0.4348
-            u_r = np.clip(int(nav.prev_input[0] / mms_per_motor_speed), -500, 500)
-            u_l = np.clip(int(nav.prev_input[1] / mms_per_motor_speed), -500, 500)
-            nav.node.send_set_variables(set_robot_speed(u_r, u_l))
+            u_l = np.clip(int(nav.prev_input[0] / mms_per_motor_speed), -500, 500)
+            u_r = np.clip(int(nav.prev_input[1] / mms_per_motor_speed), -500, 500)
+            nav.node.send_set_variables(set_robot_speed(u_l, u_r))
 
         print(f'X estimate = {new_x_est.flatten()}')
 
@@ -187,8 +190,8 @@ async def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
 
-    map_width_mm = 1000 - 25
-    map_height_mm = 696 - 25
+    map_width_mm = 972
+    map_height_mm = 671
     map_width_px = 900
     map_height_px = int(map_width_px * map_height_mm / map_width_mm)
     nav.image_to_world = get_image_to_world_matrix(map_width_px, map_height_px, map_width_mm, map_height_mm)
@@ -294,11 +297,11 @@ async def main():
                                                                                  nav.stored_target_position)
                 nav.path_image = dijkstra(nav.graph.adjacency, Graph.SOURCE, Graph.TARGET)
                 if len(nav.path_image) >= 2:
-                    nav.path_world = np.empty((len(nav.path_image) - 1, 3))
+                    nav.path_world = np.empty((len(nav.path_image) - 1, 2))
                     nav.path_world[:, :2] = np.array(
-                        [transform_affine(nav.world_to_image, nav.graph.vertices[nav.path_image[i]]) for i in
+                        [transform_affine(nav.image_to_world, nav.graph.vertices[nav.path_image[i]]) for i in
                          range(1, len(nav.path_image))])
-                    nav.path_world[:, 2] = np.arctan2(nav.path_world[:, 1], nav.path_world[:, 0])
+                    nav.path_index = 0
 
     timer.cancel()
 

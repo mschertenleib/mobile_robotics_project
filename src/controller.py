@@ -3,10 +3,10 @@ import math
 import numpy as np
 
 
-def set_robot_speed(r_speed, l_speed):
+def set_robot_speed(left_speed, right_speed):
     return {
-        "motor.left.target": [l_speed],
-        "motor.right.target": [r_speed],
+        "motor.left.target": [left_speed],
+        "motor.right.target": [right_speed],
     }
 
 
@@ -57,8 +57,8 @@ def control(state, goal_state, switch, previous_angle_error, previous_dist_error
         # print(dist_error)
         u_r = K_p_dist * dist_error + K_i_dist * dist_error_integral + K_d_dist * dist_error_derivative
         u_l = K_p_dist * dist_error + K_i_dist * dist_error_integral + K_d_dist * dist_error_derivative
-        #u_r += K_p_angle * angle_error + K_i_angle * angle_error_integral + K_d_angle * angle_error_derivative
-        #u_l += -(K_p_angle * angle_error + K_i_angle * angle_error_integral + K_d_angle * angle_error_derivative)
+        # u_r += K_p_angle * angle_error + K_i_angle * angle_error_integral + K_d_angle * angle_error_derivative
+        # u_l += -(K_p_angle * angle_error + K_i_angle * angle_error_integral + K_d_angle * angle_error_derivative)
         # print(dist_error, dist_error_integral, dist_error_derivative)
 
     speed_threshold = 40
@@ -143,43 +143,46 @@ def control2(state, goal_state, switch, previous_angle_error, previous_dist_erro
 
     return u, switch, angle_error, dist_error
 
+
 def astolfi_control(state, goal_state):
-    Kp=4  #>0
-    Ka=25  # > kp
-    Kb=-10 #<0
+    Kp = 4*2  # >0
+    Ka = 25*4  # > kp
+    Kb = -1e-8# <0
     l = 48;
     r = 22;
 
-    state[2] = np.deg2rad(state[2]);
+    delta_x = goal_state[0] - state[0];
+    delta_y = goal_state[1] - state[1];
+    reference_angle = -np.arctan2(delta_x, delta_y);
 
-    delta_x = goal_state[0]-state[0];
-    delta_y = goal_state[1]-state[1];
-    reference_angle = np.arctan2(delta_x, delta_y);
+    rho = np.sqrt(delta_x ** 2 + delta_y ** 2)
+    alpha = reference_angle - state[2]
+    if alpha < -np.pi:
+        alpha = 2 * np.pi + alpha
+    elif alpha > np.pi:
+        alpha = - 2 * np.pi + alpha
+    beta = -reference_angle
 
-    rho = np.sqrt(delta_x**2+delta_y**2);
-    alpha = reference_angle-state[2];
-    beta = -state[2]-alpha;
+    if rho < 20:
+        return 0, 0, True
 
-    v = Kp*rho;
-    omega = Ka*alpha+Kb*beta;
+    v = Kp * rho;
+    omega = Ka * alpha + Kb * beta;
 
-    u_r =(l*omega+v)/r;
-    u_l =(v-l*omega)/r;
-
-    state[2] = np.rad2deg(state[2]);
+    u_r = (l * omega + v) / r;
+    u_l = (v - l * omega) / r;
+    print(f'{delta_x = }, {delta_y = }, {alpha = }, {u_l = }, {u_r = }')
 
     speed_threshold = 80;
-    if (abs(u_r)>speed_threshold):
-        if (u_r>0):
+    if (abs(u_r) > speed_threshold):
+        if (u_r > 0):
             u_r = speed_threshold;
-        elif (u_r<0):
+        elif (u_r < 0):
             u_r = -speed_threshold;
-    if (abs(u_l)>speed_threshold):
-        if (u_l>0):
+    if (abs(u_l) > speed_threshold):
+        if (u_l > 0):
             u_l = speed_threshold;
-        elif (u_l<0):
+        elif (u_l < 0):
             u_l = -speed_threshold;
 
-    u = [u_r, u_l];
-
-    return u
+    return u_l, u_r, False
