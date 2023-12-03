@@ -20,6 +20,7 @@ class Navigator:
     def __init__(self):
         self.node = None
         self.first_estimate = True
+        self.last_sample_time = time.time()
         self.frame_map = None
         self.img_map = None
         self.detector = None
@@ -88,14 +89,11 @@ def get_robot_outline(x: float, y: float, theta: float) -> np.ndarray:
     return pos + (rot @ ROBOT_OUTLINE.T).T
 
 
-last_update = 0
-
-
 def run_navigation(nav: Navigator):
-    global last_update
-    now = time.time_ns()
-    print((now - last_update) / 1e6)
-    last_update = now
+    now = time.time()
+    delta_t = now - nav.last_sample_time
+    nav.last_sample_time = now
+    print(f'Delta T = {delta_t} seconds')
 
     nav.img_map[:] = nav.frame_map
 
@@ -130,6 +128,9 @@ def run_navigation(nav: Navigator):
                 nav.angle_error = np.rad2deg(nav.path_world[0, 2] - measurements[2, 0])
             nav.first_estimate = False
 
+        speed_left = int(nav.node.v.motor.left.speed)
+        speed_right = int(nav.node.v.motor.right.speed)
+        print(f'{speed_left = }, {speed_right = }')
         # new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, nav.prev_input)
         new_x_est, new_P_est = measurements, nav.prev_P_est
         nav.prev_x_est = new_x_est
@@ -153,7 +154,7 @@ def run_navigation(nav: Navigator):
             mms_per_motor_speed = 0.4348
             u_r = np.clip(int(nav.prev_input[0] / mms_per_motor_speed), -500, 500)
             u_l = np.clip(int(nav.prev_input[1] / mms_per_motor_speed), -500, 500)
-            nav.node.send_set_variables(move_robot(u_r, u_l))
+            nav.node.send_set_variables(set_robot_speed(u_r, u_l))
 
         print(f'X estimate = {new_x_est.flatten()}')
 
@@ -225,6 +226,7 @@ async def main():
     client = ClientAsync()
     nav.node = await client.wait_for_node()
     await nav.node.lock()
+    await nav.node.wait_for_variables({"motor.left.speed", "motor.right.speed"})
 
     program = """
     timer.period[0] = 500

@@ -234,7 +234,7 @@ async def main():
                                                                       dist_error, sample_time)
                 prev_x_est = np.array(prev_x_est)
                 prev_x_est[2] = np.deg2rad(prev_x_est[2])
-                node.send_set_variables(move_robot(prev_input[0], prev_input[1]))
+                node.send_set_variables(set_robot_speed(prev_input[0], prev_input[1]))
 
             print(f'x={new_x_est}, Sigma={new_P_est}')
 

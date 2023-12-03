@@ -3,7 +3,7 @@ import math
 import numpy as np
 
 
-def move_robot(r_speed, l_speed):
+def set_robot_speed(r_speed, l_speed):
     return {
         "motor.left.target": [l_speed],
         "motor.right.target": [r_speed],
@@ -74,7 +74,6 @@ def control(state, goal_state, switch, previous_angle_error, previous_dist_error
             u_l = -speed_threshold
 
     u = [u_r, u_l]
-    print(u)
 
     return u, switch, angle_error, dist_error
 
@@ -141,7 +140,5 @@ def control2(state, goal_state, switch, previous_angle_error, previous_dist_erro
             u_l = -speed_threshold
 
     u = [u_r, u_l]
-
-    print(u)
 
     return u, switch, angle_error, dist_error
