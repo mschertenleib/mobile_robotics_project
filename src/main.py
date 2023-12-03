@@ -18,19 +18,12 @@ class Navigator:
 
     def __init__(self):
         self.node = None
-        self.is_running = True
         self.loop_index = 0
         self.frame_map = None
         self.img_map = None
         self.detector = None
         self.image_to_world = None
         self.world_to_image = None
-        self.map_width_px = 0
-        self.map_height_px = 0
-        self.dilation_radius_px = 0
-        self.robot_radius_px = 0
-        self.target_radius_px = 0
-        self.marker_size_px = 0
         self.regions = None
         self.graph = None
         self.path_image: list[int] = []
@@ -91,12 +84,21 @@ def get_robot_outline(x: float, y: float, theta: float) -> np.ndarray:
 
 
 def run_navigation(nav: Navigator):
+    nav.img_map[:] = nav.frame_map
+
     corners, ids, rejected = nav.detector.detectMarkers(nav.frame_map)
 
     nav.robot_found, nav.robot_position, nav.robot_direction = detect_robot(corners, ids)
     nav.target_found, nav.target_position = detect_target(corners, ids)
 
     if nav.robot_found:
+        pos = nav.robot_position.astype(np.int32)
+        tip = (nav.robot_position + nav.robot_direction).astype(np.int32)
+        cv2.arrowedLine(nav.img_map, pos, tip, color=(0, 0, 255), thickness=2, line_type=cv2.LINE_AA,
+                        tipLength=0.5)
+        cv2.drawMarker(nav.img_map, position=pos, color=(0, 0, 255), thickness=2, markerSize=10,
+                       markerType=cv2.MARKER_CROSS, line_type=cv2.LINE_AA)
+
         robot_position_world = transform_affine(nav.image_to_world, nav.robot_position)
         robot_x = robot_position_world.item(0)
         robot_y = robot_position_world.item(1)
@@ -129,20 +131,13 @@ def run_navigation(nav: Navigator):
             nav.prev_x_est[2] = np.deg2rad(nav.prev_x_est[2])
             nav.node.send_set_variables(move_robot(nav.prev_input[0], nav.prev_input[1]))
 
-        print(f'x={new_x_est}, Sigma={new_P_est}')
-
-    if nav.robot_found:
-        pos = nav.robot_position.astype(np.int32)
-        tip = (nav.robot_position + nav.robot_direction).astype(np.int32)
-        cv2.arrowedLine(nav.img_map, pos, tip, color=(0, 0, 255), thickness=2, line_type=cv2.LINE_AA,
-                        tipLength=0.5)
-        cv2.drawMarker(nav.img_map, position=pos, color=(0, 0, 255), thickness=2, markerSize=10,
-                       markerType=cv2.MARKER_CROSS, line_type=cv2.LINE_AA)
+        print(f'X estimate = {new_x_est.flatten()}')
 
     if nav.target_found:
         cv2.drawMarker(nav.img_map, position=nav.target_position.astype(np.int32), color=(0, 255, 0),
-                       markerSize=10,
-                       markerType=cv2.MARKER_CROSS)
+                       markerSize=10, markerType=cv2.MARKER_CROSS, thickness=2, line_type=cv2.LINE_AA)
+        cv2.circle(nav.img_map, center=nav.target_position.astype(np.int32), radius=50, color=(0, 255, 0), thickness=2,
+                   lineType=cv2.LINE_AA)
 
     if nav.graph is not None:
         draw_static_graph(nav.img_map, nav.graph, nav.regions)
@@ -171,8 +166,6 @@ async def main():
     map_height_px = int(map_width_px * map_height_mm / map_width_mm)
     nav.image_to_world = get_image_to_world_matrix(map_width_px, map_height_px, map_width_mm, map_height_mm)
     nav.world_to_image = get_world_to_image_matrix(map_width_mm, map_height_mm, map_width_px, map_height_px)
-    nav.map_width_px = map_width_px
-    nav.map_height_px = map_height_px
 
     # Convention: in main(), all frame_* images are destined to image processing, and have no extra drawings on them.
     # All img_* images are the ones which have extra text, markers, etc. drawn on them.
@@ -188,7 +181,7 @@ async def main():
     detector_params = cv2.aruco.DetectorParameters()
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
     detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
-    nav.detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
+    nav.detector = detector
 
     # camera_matrix, distortion_coeffs = calibrate_camera(frame_width, frame_height)
     # store_to_json('camera.json', camera_matrix, distortion_coeffs)
@@ -198,10 +191,10 @@ async def main():
                                                            (map_width_px, map_height_px), 0,
                                                            (map_width_px, map_height_px))
 
-    nav.dilation_radius_px = int((ROBOT_RADIUS + 10) / map_width_mm * map_width_px)
-    nav.robot_radius_px = int((ROBOT_RADIUS + 20) / map_width_mm * map_width_px)
-    nav.target_radius_px = int((TARGET_RADIUS + 20) / map_width_mm * map_width_px)
-    nav.marker_size_px = int((MARKER_SIZE + 5) / map_width_mm * map_width_px)
+    dilation_radius_px = int((ROBOT_RADIUS + 10) / map_width_mm * map_width_px)
+    robot_radius_px = int((ROBOT_RADIUS + 20) / map_width_mm * map_width_px)
+    target_radius_px = int((TARGET_RADIUS + 20) / map_width_mm * map_width_px)
+    marker_size_px = int((MARKER_SIZE + 5) / map_width_mm * map_width_px)
 
     client = ClientAsync()
     nav.node = await client.wait_for_node()
@@ -210,10 +203,9 @@ async def main():
     timer = RepeatTimer(SAMPLING_TIME, run_navigation, args=[nav])
     timer.start()
 
-    while cap.isOpened() and nav.is_running:
+    while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
-            nav.is_running = False
             print('Cannot read frame')
             break
 
@@ -224,15 +216,12 @@ async def main():
         corners, ids, rejected = detector.detectMarkers(frame_undistorted)
 
         map_found, map_corners = detect_map(corners, ids)
-        text_y = 30
         if not map_found:
-            cv2.putText(img_undistorted, 'Map not detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            cv2.putText(img_undistorted, 'Map not detected', org=(10, 30), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=1, color=(64, 64, 192), lineType=cv2.LINE_AA)
-            text_y += 30
         else:
-            cv2.putText(img_undistorted, 'Map detected', org=(10, text_y), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            cv2.putText(img_undistorted, 'Map detected', org=(10, 30), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=1, color=(64, 192, 64), lineType=cv2.LINE_AA)
-            text_y += 30
             for corner in map_corners:
                 cv2.drawMarker(img_undistorted, position=corner.astype(np.int32), color=(0, 0, 255),
                                markerType=cv2.MARKER_CROSS, thickness=2)
@@ -240,24 +229,22 @@ async def main():
             matrix = get_perspective_transform(map_corners, map_width_px, map_height_px)
             cv2.warpPerspective(frame_undistorted, matrix, dsize=(map_width_px, map_height_px),
                                 dst=nav.frame_map)
-            nav.img_map[:] = nav.frame_map
 
         cv2.imshow('Undistorted frame', img_undistorted)
 
         key = cv2.waitKey(1) & 0xff
         if key == 27:
-            nav.is_running = False
             break
         elif key == ord('m'):
             nav.regions, nav.graph = build_static_graph(nav.frame_map,
-                                                        nav.dilation_radius_px,
+                                                        dilation_radius_px,
                                                         nav.robot_position if nav.robot_found else None,
-                                                        nav.robot_radius_px,
+                                                        robot_radius_px,
                                                         nav.target_position if nav.target_found else None,
-                                                        nav.target_radius_px,
-                                                        nav.marker_size_px,
-                                                        nav.map_width_px,
-                                                        nav.map_height_px)
+                                                        target_radius_px,
+                                                        marker_size_px,
+                                                        map_width_px,
+                                                        map_height_px)
         elif key == ord('u'):
             if nav.robot_found and nav.target_found:
                 nav.stored_robot_position = nav.robot_position
