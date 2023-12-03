@@ -117,7 +117,8 @@ def run_navigation(nav: Navigator):
                 nav.angle_error = np.rad2deg(nav.path_world[0, 2] - measurements[2, 0])
             nav.first_estimate = False
 
-        new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, nav.prev_input)
+        # new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, nav.prev_input)
+        new_x_est, new_P_est = measurements, nav.prev_P_est
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
 
@@ -136,7 +137,10 @@ def run_navigation(nav: Navigator):
                                                                                   nav.dist_error, SAMPLING_TIME)
             nav.prev_x_est = np.array(nav.prev_x_est)
             nav.prev_x_est[2] = np.deg2rad(nav.prev_x_est[2])
-            nav.node.send_set_variables(move_robot(nav.prev_input[0], nav.prev_input[1]))
+            mms_per_motor_speed = 0.4348
+            u_r = np.clip(int(nav.prev_input[0] / mms_per_motor_speed), -500, 500)
+            u_l = np.clip(int(nav.prev_input[1] / mms_per_motor_speed), -500, 500)
+            nav.node.send_set_variables(move_robot(u_r, u_l))
 
         print(f'X estimate = {new_x_est.flatten()}')
 
@@ -148,7 +152,7 @@ def run_navigation(nav: Navigator):
 
     if nav.graph is not None:
         draw_static_graph(nav.img_map, nav.graph, nav.regions)
-        if nav.free_robot_position is not None and nav.free_target_position is not None:
+        if len(nav.path_image) >= 2 and nav.free_robot_position is not None and nav.free_target_position is not None:
             draw_path(nav.img_map, nav.graph, nav.path_image, nav.stored_robot_position, nav.free_robot_position,
                       nav.stored_target_position, nav.free_target_position)
 
@@ -163,7 +167,7 @@ async def main():
     if not cap.isOpened():
         cap.release()
         return
-    
+
     frame_width = 960
     frame_height = 720
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
@@ -208,6 +212,18 @@ async def main():
     client = ClientAsync()
     nav.node = await client.wait_for_node()
     await nav.node.lock()
+
+    program = """
+    timer.period[0] = 500
+
+    onevent timer0
+        leds.top = [0, 0, 0]
+    """
+
+    r = await nav.node.compile(program)
+    print("Compilation result :", r)
+
+    await nav.node.run()
 
     timer = RepeatTimer(SAMPLING_TIME, run_navigation, args=[nav])
     timer.start()
@@ -262,14 +278,16 @@ async def main():
                                                                                  nav.stored_robot_position,
                                                                                  nav.stored_target_position)
                 nav.path_image = dijkstra(nav.graph.adjacency, Graph.SOURCE, Graph.TARGET)
-                nav.path_world = np.empty((len(nav.path_image) - 1, 3))
-                nav.path_world[:, :2] = np.array(
-                    [transform_affine(nav.world_to_image, nav.graph.vertices[nav.path_image[i]]) for i in
-                     range(1, len(nav.path_image))])
-                nav.path_world[:, 2] = np.arctan2(nav.path_world[:, 1], nav.path_world[:, 0])
+                if len(nav.path_image) >= 2:
+                    nav.path_world = np.empty((len(nav.path_image) - 1, 3))
+                    nav.path_world[:, :2] = np.array(
+                        [transform_affine(nav.world_to_image, nav.graph.vertices[nav.path_image[i]]) for i in
+                         range(1, len(nav.path_image))])
+                    nav.path_world[:, 2] = np.arctan2(nav.path_world[:, 1], nav.path_world[:, 0])
 
     timer.cancel()
 
+    await nav.node.stop()
     await nav.node.unlock()
 
     cap.release()
