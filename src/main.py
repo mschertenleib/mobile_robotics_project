@@ -18,7 +18,7 @@ class Navigator:
 
     def __init__(self):
         self.node = None
-        self.loop_index = 0
+        self.first_estimate = True
         self.frame_map = None
         self.img_map = None
         self.detector = None
@@ -109,21 +109,28 @@ def run_navigation(nav: Navigator):
                       lineType=cv2.LINE_AA)
 
         measurements = np.array([[robot_x], [robot_y], [robot_theta]])
-        if nav.loop_index == 0:
+        if nav.first_estimate:
             nav.prev_x_est[:] = measurements
-            if len(nav.path_world) != 0:
+            if nav.path_world is not None and len(nav.path_world) != 0:
                 nav.dist_error = np.sqrt(
                     (nav.path_world[0, 0] - measurements[0, 0]) ** 2 + (nav.path_world[0, 1] - measurements[1, 0]) ** 2)
                 nav.angle_error = np.rad2deg(nav.path_world[0, 2] - measurements[2, 0])
+            nav.first_estimate = False
 
         new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, nav.prev_input)
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
 
+        estimated_state = new_x_est.flatten()
+        outline = get_robot_outline(estimated_state[0], estimated_state[1], estimated_state[2]).astype(np.int32)
+        outline = np.array([transform_affine(nav.world_to_image, pt) for pt in outline], dtype=np.int32)
+        cv2.polylines(nav.img_map, [outline], isClosed=True, color=(192, 64, 64), thickness=2,
+                      lineType=cv2.LINE_AA)
+
         if nav.path_world is not None and len(nav.path_world) != 0:
             nav.prev_x_est = nav.prev_x_est.tolist()
             nav.prev_x_est[2] = np.rad2deg(nav.prev_x_est[2])
-            goal_state = [nav.path_world[0, 0], nav.path_world[1, 0], np.rad2deg(nav.path_world[2, 0])]
+            goal_state = [nav.path_world[0, 0], nav.path_world[0, 1], np.rad2deg(nav.path_world[0, 2])]
             nav.prev_input, nav.switch, nav.angle_error, nav.dist_error = control(nav.prev_x_est, goal_state,
                                                                                   nav.switch, nav.angle_error,
                                                                                   nav.dist_error, SAMPLING_TIME)
@@ -148,13 +155,15 @@ def run_navigation(nav: Navigator):
     cv2.imshow('Map', nav.img_map)
     cv2.waitKey(1)
 
-    nav.loop_index += 1
-
 
 async def main():
     nav = Navigator()
 
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        cap.release()
+        return
+    
     frame_width = 960
     frame_height = 720
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
