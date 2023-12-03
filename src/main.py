@@ -41,9 +41,10 @@ class Navigator:
         self.stored_target_position = np.zeros(2)
         self.free_target_position = np.zeros(2)
         self.prev_x_est = np.zeros((3, 1))
-        self.prev_P_est = [[[ 4.12148917e-02, -1.07933653e-04,  4.21480900e-04], # 'straight line P_est convergence'
-                            [-1.07933653e-04,  4.04040766e-02, -5.94141187e-05],
-                            [ 4.21480900e-04, -5.94141187e-05,  3.06223793e-02]]]
+        # 'straight line P_est convergence'
+        self.prev_P_est = np.array([[4.12148917e-02, -1.07933653e-04, 4.21480900e-04],
+                                    [-1.07933653e-04, 4.04040766e-02, -5.94141187e-05],
+                                    [4.21480900e-04, -5.94141187e-05, 3.06223793e-02]])
         self.prev_input = np.zeros(2)
         self.angle_error = 0.0
         self.dist_error = 0.0
@@ -135,7 +136,9 @@ def run_navigation(nav: Navigator):
         speed_left = int(nav.node["motor.left.speed"])
         speed_right = int(nav.node["motor.right.speed"])
         print(f'{speed_left = }, {speed_right = }')
-        new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, nav.prev_input)
+
+        prev_input = np.array([speed_left * MMS_PER_MOTOR_SPEED, speed_right * MMS_PER_MOTOR_SPEED])
+        new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, prev_input)
         # new_x_est, new_P_est = measurements, nav.prev_P_est
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
@@ -146,19 +149,18 @@ def run_navigation(nav: Navigator):
         cv2.polylines(nav.img_map, [outline], isClosed=True, color=(192, 64, 64), thickness=2,
                       lineType=cv2.LINE_AA)
 
-        if nav.path_world is not None and len(nav.path_world) != 0 and nav.path_index < len(nav.path_world):
+        if nav.path_world is not None and len(nav.path_world) != 0:
             nav.prev_x_est = nav.prev_x_est.tolist()
             goal_state = [nav.path_world[nav.path_index, 0], nav.path_world[nav.path_index, 1]]
 
             input_left, input_right, goal_reached = astolfi_control(np.array(nav.prev_x_est).flatten(), goal_state)
-            if goal_reached:
+            if goal_reached and nav.path_index < len(nav.path_world) - 1:
                 nav.path_index += 1
 
             nav.prev_input[:] = input_left, input_right
             nav.prev_x_est = np.array(nav.prev_x_est)
-            mms_per_motor_speed = 0.4348
-            u_l = np.clip(int(nav.prev_input[0] / mms_per_motor_speed), -500, 500)
-            u_r = np.clip(int(nav.prev_input[1] / mms_per_motor_speed), -500, 500)
+            u_l = np.clip(int(nav.prev_input[0] / MMS_PER_MOTOR_SPEED), -500, 500)
+            u_r = np.clip(int(nav.prev_input[1] / MMS_PER_MOTOR_SPEED), -500, 500)
             nav.node.send_set_variables(set_robot_speed(u_l, u_r))
 
         print(f'X estimate = {new_x_est.flatten()}')
@@ -231,7 +233,7 @@ async def main():
     client = ClientAsync()
     nav.node = await client.wait_for_node()
     await nav.node.lock()
-    await nav.node.wait_for_variables({"motor.left.speed", "motor.right.speed"})
+    await nav.node.wait_for_variables()
 
     program = """
     timer.period[0] = 500
@@ -242,13 +244,14 @@ async def main():
 
     r = await nav.node.compile(program)
     print("Compilation result :", r)
-
     await nav.node.run()
 
     timer = RepeatTimer(SAMPLING_TIME, run_navigation, args=[nav])
     timer.start()
 
     while cap.isOpened():
+        await client.sleep(0.01)
+
         ret, frame = cap.read()
         if not ret:
             print('Cannot read frame')

@@ -145,8 +145,8 @@ def control2(state, goal_state, switch, previous_angle_error, previous_dist_erro
 
 
 def astolfi_control(state, goal_state):
-    Kp = 4*2  # >0
-    Ka = 25*4  # > kp
+    Kp = 8  # >0
+    Ka = 25*3  # > kp
     Kb = -1e-8# <0
     l = 48;
     r = 22;
