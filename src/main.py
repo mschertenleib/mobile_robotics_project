@@ -270,7 +270,8 @@ async def main():
         # Let the client handle its work
         await client.sleep(0.005)
 
-        video_thread.get_frame(frame)
+        # Get the latest frame
+        is_frame_new = video_thread.get_frame(frame)
 
         cv2.undistort(frame, camera_matrix, distortion_coeffs, dst=frame_undistorted,
                       newCameraMatrix=new_camera_matrix)
