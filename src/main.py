@@ -1,6 +1,9 @@
-import asyncio
 from threading import Timer
+from typing import *
 
+import dearpygui.dearpygui as dpg
+import dearpygui.demo as demo
+from tdmclient import aw
 from tdmclient.atranspiler import ATranspiler
 
 from camera_calibration import *
@@ -22,11 +25,13 @@ class Navigator:
         self.node = None
         self.first_estimate = True
         self.last_sample_time = time.time()
-        self.frame_map = None
-        self.img_map = None
+        self.frame_map = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 3), dtype=np.uint8)
+        self.img_map = np.zeros_like(self.frame_map)
+        self.map_rgba_f32 = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 4), dtype=np.float32)
+        self.map_rgba_f32[:, :, 3] = 1.0
         self.detector = None
-        self.image_to_world = None
-        self.world_to_image = None
+        self.image_to_world = get_image_to_world_matrix(MAP_WIDTH_PX, MAP_HEIGHT_PX, MAP_WIDTH_MM, MAP_HEIGHT_MM)
+        self.world_to_image = get_world_to_image_matrix(MAP_WIDTH_MM, MAP_HEIGHT_MM, MAP_WIDTH_PX, MAP_HEIGHT_PX)
         self.regions = None
         self.graph = None
         self.path_image: list[int] = []
@@ -108,6 +113,32 @@ def build_static_graph(img: np.ndarray, robot_position: typing.Optional[np.ndarr
     return regions, graph
 
 
+def callback_build_graph(sender, app_data, user_data):
+    assert isinstance(user_data, Navigator)
+    nav = user_data
+    nav.regions, nav.graph = build_static_graph(nav.frame_map,
+                                                nav.robot_position if nav.robot_found else None,
+                                                nav.target_position if nav.target_found else None)
+
+
+def callback_update_graph(sender, app_data, user_data):
+    assert isinstance(user_data, Navigator)
+    nav = user_data
+    if nav.robot_found and nav.target_found:
+        nav.stored_robot_position = nav.robot_position
+        nav.stored_target_position = nav.target_position
+        nav.free_robot_position, nav.free_target_position = update_graph(nav.graph, nav.regions,
+                                                                         nav.stored_robot_position,
+                                                                         nav.stored_target_position)
+        nav.path_image = dijkstra(nav.graph.adjacency, Graph.SOURCE, Graph.TARGET)
+        if len(nav.path_image) >= 2:
+            nav.path_world = np.empty((len(nav.path_image) - 1, 2))
+            nav.path_world[:, :2] = np.array(
+                [transform_affine(nav.image_to_world, nav.graph.vertices[nav.path_image[i]]) for i in
+                 range(1, len(nav.path_image))])
+            nav.path_index = 0
+
+
 def draw_static_graph(img: np.ndarray, graph: Graph, regions: list[list[np.ndarray]]):
     free_space = np.empty_like(img)
     free_space[:] = (64, 64, 192)
@@ -125,6 +156,105 @@ def get_robot_outline(x: float, y: float, theta: float) -> np.ndarray:
     rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
     pos = np.array([x, y])
     return pos + (rot @ ROBOT_OUTLINE.T).T
+
+
+def resize_image_to_fit_window(window: Union[int, str], image: Union[int, str], image_aspect_ratio: float):
+    window_width, window_height = dpg.get_item_rect_size(window)
+    if window_width <= 0 or window_height <= 0:
+        return
+
+    # Use the item position within the window to deduce the available size in the window
+    image_pos_x, image_pos_y = dpg.get_item_pos(image)
+    window_content_width = window_width - 2 * image_pos_x
+    window_content_height = window_height - image_pos_y - image_pos_x
+    if window_content_width <= 0 or window_content_height <= 0:
+        return
+
+    # Make the image as big as possible while keeping its aspect ratio
+    image_width, image_height = window_content_width, window_content_height
+    if window_content_width / window_content_height >= image_aspect_ratio:
+        image_width = int(image_height * image_aspect_ratio)
+    else:
+        image_height = int(image_width / image_aspect_ratio)
+
+    dpg.set_item_width(image, image_width)
+    dpg.set_item_height(image, image_height)
+
+
+def resize_plot_to_fit_window(window: Union[int, str], plot: Union[int, str], image_aspect_ratio: float):
+    window_width, window_height = dpg.get_item_rect_size(window)
+    if window_width <= 0 or window_height <= 0:
+        return
+
+    # Use the item position within the window to deduce the window's border width and title bar height
+    plot_pos_x, plot_pos_y = dpg.get_item_pos(plot)
+    window_content_width = window_width - 2 * plot_pos_x
+    window_content_height = window_height - plot_pos_y - plot_pos_x
+    plot_width, plot_height = dpg.get_item_rect_size(plot)
+
+    # TODO: it should be possible to correctly resize the plot, but need to make a drawing
+
+    # dpg.set_axis_limits('tag_map_axis_x', 0, MAP_WIDTH_PX)
+    # dpg.set_axis_limits('tag_map_axis_y', 0, MAP_HEIGHT_PX)
+    # print(dpg.get_axis_limits('tag_map_axis_x'))
+    # print(dpg.get_axis_limits('tag_map_axis_y'))
+
+
+# FIXME: temporary
+data_x = []
+data_y = []
+current_plot_x = 0
+
+
+# FIXME: temporary
+def update_series():
+    global current_plot_x
+    data_x.append(current_plot_x)
+    current_plot_x += 0.01
+    data_y.append(np.random.random())
+    dpg.set_value('tag_series', [data_x, data_y])
+    dpg.set_axis_limits_auto('tag_plot_axis_x')
+    dpg.set_axis_limits_auto('tag_plot_axis_y')
+
+
+def build_interface(nav: Navigator):
+    dpg.configure_app(docking=True, docking_space=True, init_file='imgui.ini', auto_save_init_file=True)
+    dpg.create_viewport(title='Robot interface', width=640, height=480)
+
+    with dpg.texture_registry():
+        default_frame_data = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 4), dtype=np.float32)
+        default_frame_data[:, :, 3] = 1.0
+        default_map_data = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 4), dtype=np.float32)
+        default_map_data[:, :, 3] = 1.0
+        dpg.add_raw_texture(width=FRAME_WIDTH, height=FRAME_HEIGHT, default_value=default_frame_data,
+                            format=dpg.mvFormat_Float_rgba,
+                            tag='tag_frame_texture')
+        dpg.add_raw_texture(width=MAP_WIDTH_PX, height=MAP_HEIGHT_PX, default_value=default_map_data,
+                            format=dpg.mvFormat_Float_rgba,
+                            tag='tag_map_texture')
+
+    with dpg.window(label='Camera', tag='tag_camera_window', no_close=True):
+        dpg.add_image(texture_tag='tag_frame_texture', tag='tag_frame_image')
+
+    with dpg.window(label='Map', tag='tag_map_window', no_close=True):
+        dpg.add_button(label='Build map', callback=callback_build_graph, user_data=nav)
+        dpg.add_button(label='Update graph', callback=callback_update_graph, user_data=nav)
+        with dpg.plot(label='Map', tag='tag_map_plot', equal_aspects=True):
+            dpg.add_plot_axis(dpg.mvXAxis, label='X [mm]', tag='tag_map_axis_x')
+            with dpg.plot_axis(dpg.mvYAxis, label='Y [mm]', tag='tag_map_axis_y'):
+                dpg.add_image_series(texture_tag='tag_map_texture', tag='tag_map_image_series', bounds_min=(0, 0),
+                                     bounds_max=(MAP_WIDTH_PX, MAP_HEIGHT_PX))
+
+    with dpg.window(label='State plot', tag='tag_plot_window', no_close=True):
+        with dpg.plot(label='State plot', tag='tag_plot', width=-1, height=-1):
+            dpg.add_plot_legend()
+            dpg.add_plot_axis(dpg.mvXAxis, label='x', tag='tag_plot_axis_x')
+            with dpg.plot_axis(dpg.mvYAxis, label='y', tag='tag_plot_axis_y'):
+                dpg.add_line_series(data_x, data_y, label='random data', tag='tag_series')
+
+    dpg.setup_dearpygui()
+    demo.show_demo()
+    dpg.show_viewport()
 
 
 def run_navigation(nav: Navigator):
@@ -203,8 +333,8 @@ def run_navigation(nav: Navigator):
             draw_path(nav.img_map, nav.graph, nav.path_image, nav.stored_robot_position, nav.free_robot_position,
                       nav.stored_target_position, nav.free_target_position)
 
-    cv2.imshow('Map', nav.img_map)
-    cv2.waitKey(1)
+    nav.map_rgba_f32[:, :, 2::-1] = nav.img_map / 255.0
+    dpg.set_value('tag_map_texture', nav.map_rgba_f32.flatten())
 
 
 def run_local_navigation(loc_nav: LocalNavigator):
@@ -213,18 +343,15 @@ def run_local_navigation(loc_nav: LocalNavigator):
         prox_horizontal[i] = list(loc_nav.node.v.prox.horizontal)[i]
     obst = [prox_horizontal[0], prox_horizontal[1], prox_horizontal[2], prox_horizontal[3], prox_horizontal[4]]
 
-    asyncio.run(avoid_obstacles(loc_nav.node, loc_nav.client, loc_nav.state, loc_nav.side, obst, loc_nav.HTobst,
-                                loc_nav.LTobst, loc_nav.motor_speed, loc_nav.step_back_time, loc_nav.spped_gain,
-                                loc_nav.rotation_time))
+    aw(avoid_obstacles(loc_nav.node, loc_nav.client, loc_nav.state, loc_nav.side, obst, loc_nav.HTobst,
+                       loc_nav.LTobst, loc_nav.motor_speed, loc_nav.step_back_time, loc_nav.spped_gain,
+                       loc_nav.rotation_time))
 
 
-async def main():
+def main():
     nav = Navigator()
 
     video_thread = VideoThread(FRAME_WIDTH, FRAME_HEIGHT)
-
-    nav.image_to_world = get_image_to_world_matrix(MAP_WIDTH_PX, MAP_HEIGHT_PX, MAP_WIDTH_MM, MAP_HEIGHT_MM)
-    nav.world_to_image = get_world_to_image_matrix(MAP_WIDTH_MM, MAP_HEIGHT_MM, MAP_WIDTH_PX, MAP_HEIGHT_PX)
 
     # Convention: in main(), all frame_* images are destined to image processing, and have no extra drawings on them.
     # All img_* images are the ones which have extra text, markers, etc. drawn on them.
@@ -232,9 +359,12 @@ async def main():
     frame = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
     frame_undistorted = np.zeros_like(frame)
     img_undistorted = np.zeros_like(frame)
+    # RGBA f32 image for displaying with dearpygui
+    frame_rgba_f32 = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 4), dtype=np.float32)
+    frame_rgba_f32[:, :, 3] = 1.0
 
-    nav.frame_map = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 3), dtype=np.uint8)
-    nav.img_map = np.zeros_like(nav.frame_map)
+    FRAME_ASPECT_RATIO = FRAME_WIDTH / FRAME_HEIGHT
+    MAP_ASPECT_RATIO = MAP_WIDTH_PX / MAP_HEIGHT_PX
 
     detector_params = cv2.aruco.DetectorParameters()
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
@@ -242,22 +372,22 @@ async def main():
     nav.detector = detector
 
     # camera_matrix, distortion_coeffs = calibrate_camera(frame_width, frame_height)
-    # store_to_json('camera.json', camera_matrix, distortion_coeffs)
+    # store_to_json('./camera.json', camera_matrix, distortion_coeffs)
     # return
-    camera_matrix, distortion_coeffs = load_from_json('camera.json')
+    camera_matrix, distortion_coeffs = load_from_json('./camera.json')
     new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs,
                                                            (MAP_WIDTH_PX, MAP_HEIGHT_PX), 0,
                                                            (MAP_WIDTH_PX, MAP_HEIGHT_PX))
 
     client = ClientAsync()
-    nav.node = await client.wait_for_node()
-    await nav.node.lock()
+    nav.node = aw(client.wait_for_node())
+    aw(nav.node.lock())
 
-    compile_ok = await compile_run_python_for_thymio(nav.node)
+    compile_ok = aw(compile_run_python_for_thymio(nav.node))
     if not compile_ok:
-        await nav.node.unlock()
+        aw(nav.node.unlock())
 
-    await nav.node.wait_for_variables()
+    aw(nav.node.wait_for_variables())
 
     timer = RepeatTimer(SAMPLING_TIME, run_navigation, args=[nav])
     timer.start()
@@ -266,9 +396,12 @@ async def main():
     local_nav_timer = RepeatTimer(0.1, run_local_navigation, args=[loc_nav])
     # local_nav_timer.start()
 
-    while True:
+    dpg.create_context()
+    build_interface(nav)
+
+    while dpg.is_dearpygui_running():
         # Let the client handle its work
-        await client.sleep(0.005)
+        aw(client.sleep(0.005))
 
         # Get the latest frame
         is_frame_new = video_thread.get_frame(frame)
@@ -294,39 +427,25 @@ async def main():
             cv2.warpPerspective(frame_undistorted, matrix, dsize=(MAP_WIDTH_PX, MAP_HEIGHT_PX),
                                 dst=nav.frame_map)
 
-        cv2.imshow('Undistorted frame', img_undistorted)
+        frame_rgba_f32[:, :, 2::-1] = img_undistorted / 255.0
+        dpg.set_value('tag_frame_texture', frame_rgba_f32.flatten())
 
-        key = cv2.waitKey(1) & 0xff
-        if key == 27:
-            break
-        elif key == ord('m'):
-            nav.regions, nav.graph = build_static_graph(nav.frame_map,
-                                                        nav.robot_position if nav.robot_found else None,
-                                                        nav.target_position if nav.target_found else None)
-        elif key == ord('u'):
-            if nav.robot_found and nav.target_found:
-                nav.stored_robot_position = nav.robot_position
-                nav.stored_target_position = nav.target_position
-                nav.free_robot_position, nav.free_target_position = update_graph(nav.graph, nav.regions,
-                                                                                 nav.stored_robot_position,
-                                                                                 nav.stored_target_position)
-                nav.path_image = dijkstra(nav.graph.adjacency, Graph.SOURCE, Graph.TARGET)
-                if len(nav.path_image) >= 2:
-                    nav.path_world = np.empty((len(nav.path_image) - 1, 2))
-                    nav.path_world[:, :2] = np.array(
-                        [transform_affine(nav.image_to_world, nav.graph.vertices[nav.path_image[i]]) for i in
-                         range(1, len(nav.path_image))])
-                    nav.path_index = 0
+        resize_image_to_fit_window('tag_camera_window', 'tag_frame_image', FRAME_ASPECT_RATIO)
+        resize_plot_to_fit_window('tag_map_window', 'tag_map_plot', MAP_ASPECT_RATIO)
+        # FIXME: this is just for testing
+        update_series()
+
+        dpg.render_dearpygui_frame()
 
     timer.cancel()
     local_nav_timer.cancel()
 
-    await nav.node.stop()
-    await nav.node.unlock()
+    aw(nav.node.stop())
+    aw(nav.node.unlock())
 
     video_thread.stop()
-    cv2.destroyAllWindows()
+    dpg.destroy_context()
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
