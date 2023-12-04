@@ -1,16 +1,15 @@
 import asyncio
-import time
 from threading import Timer
 
-from tdmclient import ClientAsync
+from tdmclient.atranspiler import ATranspiler
 
 from camera_calibration import *
 from controller import *
 from global_map import *
 from image_processing import *
 from kalman_filter import *
-from parameters import *
 from locnavig import *
+from parameters import *
 
 
 class Navigator:
@@ -78,8 +77,6 @@ class RepeatTimer(Timer):
             self.function(*self.args, **self.kwargs)
             time_end_function = time.time()
             wait_time = self.interval - (time_end_function - time_start_function)
-
-
 
 
 def build_static_graph(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
@@ -181,7 +178,7 @@ def run_navigation(nav: Navigator):
             nav.prev_x_est = np.array(nav.prev_x_est)
             u_l = np.clip(int(nav.prev_input[0] / MMS_PER_MOTOR_SPEED), -500, 500)
             u_r = np.clip(int(nav.prev_input[1] / MMS_PER_MOTOR_SPEED), -500, 500)
-            nav.node.send_set_variables(set_robot_speed(u_l, u_r))
+            nav.node.send_send_events({"requestspeed": [u_l, u_r]})
 
         print(f'X estimate = {new_x_est.flatten()}')
 
@@ -208,8 +205,8 @@ def run_local_navigation(loc_nav: LocalNavigator):
     obst = [prox_horizontal[0], prox_horizontal[1], prox_horizontal[2], prox_horizontal[3], prox_horizontal[4]]
 
     asyncio.run(avoid_obstacles(loc_nav.node, loc_nav.client, loc_nav.state, loc_nav.side, obst, loc_nav.HTobst,
-                          loc_nav.LTobst, loc_nav.motor_speed, loc_nav.step_back_time, loc_nav.spped_gain,
-                          loc_nav.rotation_time))
+                                loc_nav.LTobst, loc_nav.motor_speed, loc_nav.step_back_time, loc_nav.spped_gain,
+                                loc_nav.rotation_time))
 
 
 async def main():
@@ -264,28 +261,32 @@ async def main():
     client = ClientAsync()
     nav.node = await client.wait_for_node()
     await nav.node.lock()
+
+    await nav.node.register_events([("requestspeed", 2)])
+
+    with open('thymio_program.py', 'r') as file:
+        thymio_program_python = file.read()
+        thymio_program_aseba = ATranspiler.simple_transpile(thymio_program_python)
+        compilation_result = await nav.node.compile(thymio_program_aseba)
+        if compilation_result is None:
+            print("Compilation success")
+        else:
+            print("Compilation error :", compilation_result)
+            await nav.node.unlock()
+            return
+        await nav.node.run()
+
     await nav.node.wait_for_variables()
-
-    program = """
-    timer.period[0] = 500
-
-    onevent timer0
-        leds.top = [0, 0, 0]
-    """
-
-    r = await nav.node.compile(program)
-    print("Compilation result :", r)
-    await nav.node.run()
 
     timer = RepeatTimer(SAMPLING_TIME, run_navigation, args=[nav])
     timer.start()
 
     loc_nav = LocalNavigator(client, nav.node)
     local_nav_timer = RepeatTimer(0.1, run_local_navigation, args=[loc_nav])
-    local_nav_timer.start()
+    # local_nav_timer.start()
 
     while cap.isOpened():
-        await client.sleep(0.01)
+        await client.sleep(0.005)
 
         ret, frame = cap.read()
         if not ret:

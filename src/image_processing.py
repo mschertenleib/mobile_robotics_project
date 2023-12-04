@@ -44,7 +44,7 @@ def get_obstacle_mask(img: np.ndarray, dilation_radius_px: int, robot_position: 
     A border is also added.
     """
 
-    threshold = 200
+    threshold = 150
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
 
