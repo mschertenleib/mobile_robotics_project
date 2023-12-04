@@ -253,7 +253,6 @@ def build_interface(nav: Navigator):
                 dpg.add_line_series(data_x, data_y, label='random data', tag='tag_series')
 
     dpg.setup_dearpygui()
-    demo.show_demo()
     dpg.show_viewport()
 
 
@@ -353,9 +352,6 @@ def main():
 
     video_thread = VideoThread(FRAME_WIDTH, FRAME_HEIGHT)
 
-    # Convention: in main(), all frame_* images are destined to image processing, and have no extra drawings on them.
-    # All img_* images are the ones which have extra text, markers, etc. drawn on them.
-
     frame = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
     frame_undistorted = np.zeros_like(frame)
     img_undistorted = np.zeros_like(frame)
@@ -398,6 +394,8 @@ def main():
 
     dpg.create_context()
     build_interface(nav)
+
+    print(dpg.get_global_font_scale())
 
     while dpg.is_dearpygui_running():
         # Let the client handle its work
