@@ -25,7 +25,6 @@ def main():
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
-    # cap.set(cv2.CAP_PROP_FPS, 30)
 
     dpg.setup_dearpygui()
     dpg.show_viewport()

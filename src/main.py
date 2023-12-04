@@ -112,11 +112,6 @@ def get_robot_outline(x: float, y: float, theta: float) -> np.ndarray:
 
 
 def run_navigation(nav: Navigator):
-    now = time.time()
-    delta_t = now - nav.last_sample_time
-    nav.last_sample_time = now
-    # print(f'dt = {delta_t:8.2f} s')
-
     nav.img_map[:] = nav.frame_map
 
     corners, ids, rejected = nav.detector.detectMarkers(nav.frame_map)
@@ -153,8 +148,6 @@ def run_navigation(nav: Navigator):
 
         speed_left = int(nav.node["motor.left.speed"])
         speed_right = int(nav.node["motor.right.speed"])
-        print(f'{speed_left = }, {speed_right = }')
-
         prev_input = np.array([speed_left * MMS_PER_MOTOR_SPEED, speed_right * MMS_PER_MOTOR_SPEED])
         new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, prev_input)
         nav.prev_x_est = new_x_est
