@@ -10,6 +10,7 @@ from image_processing import *
 from kalman_filter import *
 from local_navigation import *
 from parameters import *
+from threaded_capture import *
 
 
 class Navigator:
@@ -205,15 +206,9 @@ def run_local_navigation(loc_nav: LocalNavigator):
 async def main():
     nav = Navigator()
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        cap.release()
-        return
-
     frame_width = 960
     frame_height = 720
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
+    video_thread = VideoThread(frame_width, frame_height)
 
     map_width_mm = 972
     map_height_mm = 671
@@ -225,11 +220,10 @@ async def main():
     # Convention: in main(), all frame_* images are destined to image processing, and have no extra drawings on them.
     # All img_* images are the ones which have extra text, markers, etc. drawn on them.
 
-    # Undistorted
-    frame_undistorted = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
-    img_undistorted = np.zeros_like(frame_undistorted)
+    frame = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+    frame_undistorted = np.zeros_like(frame)
+    img_undistorted = np.zeros_like(frame)
 
-    # Undistorted, perspective corrected
     nav.frame_map = np.zeros((map_height_px, map_width_px, 3), dtype=np.uint8)
     nav.img_map = np.zeros_like(nav.frame_map)
 
@@ -262,9 +256,9 @@ async def main():
         thymio_program_aseba = ATranspiler.simple_transpile(thymio_program_python)
         compilation_result = await nav.node.compile(thymio_program_aseba)
         if compilation_result is None:
-            print("Compilation success")
+            print('Compilation success')
         else:
-            print("Compilation error :", compilation_result)
+            print('Compilation error :', compilation_result)
             await nav.node.unlock()
             return
         await nav.node.run()
@@ -278,19 +272,11 @@ async def main():
     local_nav_timer = RepeatTimer(0.1, run_local_navigation, args=[loc_nav])
     # local_nav_timer.start()
 
-    last_sample_time = time.time()
-    while cap.isOpened():
-        now = time.time()
-        delta_t = now - last_sample_time
-        last_sample_time = now
-        print(f'dt = {delta_t:8.2f} s')
-
+    while True:
+        # Let the client handle its work
         await client.sleep(0.005)
 
-        ret, frame = cap.read()
-        if not ret:
-            print('Cannot read frame')
-            break
+        video_thread.get_frame(frame)
 
         cv2.undistort(frame, camera_matrix, distortion_coeffs, dst=frame_undistorted,
                       newCameraMatrix=new_camera_matrix)
@@ -349,7 +335,7 @@ async def main():
     await nav.node.stop()
     await nav.node.unlock()
 
-    cap.release()
+    video_thread.stop()
     cv2.destroyAllWindows()
 
 
