@@ -8,7 +8,7 @@ from controller import *
 from global_map import *
 from image_processing import *
 from kalman_filter import *
-from locnavig import *
+from local_navigation import *
 from parameters import *
 
 
@@ -115,7 +115,7 @@ def run_navigation(nav: Navigator):
     now = time.time()
     delta_t = now - nav.last_sample_time
     nav.last_sample_time = now
-    # print(f'Delta T = {delta_t} seconds')
+    # print(f'dt = {delta_t:8.2f} s')
 
     nav.img_map[:] = nav.frame_map
 
@@ -212,7 +212,7 @@ def run_local_navigation(loc_nav: LocalNavigator):
 async def main():
     nav = Navigator()
 
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         cap.release()
         return
@@ -285,7 +285,13 @@ async def main():
     local_nav_timer = RepeatTimer(0.1, run_local_navigation, args=[loc_nav])
     # local_nav_timer.start()
 
+    last_sample_time = time.time()
     while cap.isOpened():
+        now = time.time()
+        delta_t = now - last_sample_time
+        last_sample_time = now
+        print(f'dt = {delta_t:8.2f} s')
+
         await client.sleep(0.005)
 
         ret, frame = cap.read()

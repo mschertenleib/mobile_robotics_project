@@ -1,7 +1,7 @@
+import cv2
 import dearpygui.dearpygui as dpg
 import dearpygui.demo as demo
 import numpy as np
-import cv2
 
 
 def main():
@@ -11,16 +11,21 @@ def main():
 
     demo.show_demo()
 
-    dpg.add_texture_registry(label="Texture Container", tag="__texture_container")
-    width = 640
-    height = 480
-    dpg.add_dynamic_texture(width, height, np.zeros((height, width, 4), dtype=np.float32).flatten().tolist(),
-                            parent="__texture_container", tag="__grid")
+    frame_width = 960
+    frame_height = 720
+    rgba = np.empty((frame_height, frame_width, 4), dtype=np.float32)
+
+    with dpg.texture_registry():
+        dpg.add_raw_texture(width=frame_width, height=frame_height, default_value=rgba, format=dpg.mvFormat_Float_rgba,
+                            tag="frame")
 
     with dpg.window(label="Main window", width=800, height=800, pos=(100, 100)):
-        dpg.add_image("__grid")
+        dpg.add_image("frame")
 
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
+    # cap.set(cv2.CAP_PROP_FPS, 30)
 
     dpg.setup_dearpygui()
     dpg.show_viewport()
@@ -28,16 +33,14 @@ def main():
     while dpg.is_dearpygui_running():
         if cap.isOpened():
             ret, frame = cap.read()
-            rgba = np.empty((frame.shape[0], frame.shape[1], 4), dtype=np.float32)
-            rgba[:, :, 2::-1] = frame / 255.0
-            rgba[:, :, 3] = 1.0
             if ret:
-                dpg.set_value("__grid", rgba.flatten().tolist())
+                rgba[:, :, 2::-1] = frame / 255.0
+                rgba[:, :, 3] = 1.0
+                dpg.set_value("frame", rgba.flatten())
 
         dpg.render_dearpygui_frame()
 
     cap.release()
-    dpg.delete_item("__texture_container")
     dpg.destroy_context()
 
 
