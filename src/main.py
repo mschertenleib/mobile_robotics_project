@@ -80,6 +80,23 @@ class RepeatTimer(Timer):
             wait_time = self.interval - (time_end_function - time_start_function)
 
 
+async def compile_run_python_for_thymio(node):
+    await node.register_events([("requestspeed", 2)])
+
+    with open('thymio_program.py', 'r') as file:
+        thymio_program_python = file.read()
+        thymio_program_aseba = ATranspiler.simple_transpile(thymio_program_python)
+        compilation_result = await node.compile(thymio_program_aseba)
+        if compilation_result is None:
+            print('Compilation success')
+        else:
+            print('Compilation error :', compilation_result)
+            return False
+        await node.run()
+
+    return True
+
+
 def build_static_graph(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
                        robot_radius_px: int, target_position: typing.Optional[np.ndarray], target_radius_px: int,
                        marker_size_px: int, map_width_px: int, map_height_px: int) -> tuple[
@@ -249,19 +266,9 @@ async def main():
     nav.node = await client.wait_for_node()
     await nav.node.lock()
 
-    await nav.node.register_events([("requestspeed", 2)])
-
-    with open('thymio_program.py', 'r') as file:
-        thymio_program_python = file.read()
-        thymio_program_aseba = ATranspiler.simple_transpile(thymio_program_python)
-        compilation_result = await nav.node.compile(thymio_program_aseba)
-        if compilation_result is None:
-            print('Compilation success')
-        else:
-            print('Compilation error :', compilation_result)
-            await nav.node.unlock()
-            return
-        await nav.node.run()
+    compile_ok = await compile_run_python_for_thymio(nav.node)
+    if not compile_ok:
+        await nav.node.unlock()
 
     await nav.node.wait_for_variables()
 
