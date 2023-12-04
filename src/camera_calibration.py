@@ -4,12 +4,20 @@ import cv2
 import numpy as np
 
 
-def calibrate_camera(frame_width, frame_height):
+def create_board() -> cv2.aruco.CharucoBoard:
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_50)
-    board = cv2.aruco.CharucoBoard(size=(5, 7), squareLength=39.1, markerLength=19.6, dictionary=dictionary)
-    # board_image = board.generateImage(outSize=(1000, 1400), marginSize=20, borderBits=1)
-    # cv2.imwrite('charuco_board.png', board_image)
-    # return
+    return cv2.aruco.CharucoBoard(size=(5, 7), squareLength=39.1, markerLength=19.6, dictionary=dictionary)
+
+
+# generate_board_image('charuco_board.png')
+def generate_board_image(filename):
+    board = create_board()
+    board_image = board.generateImage(outSize=(1000, 1400), marginSize=20, borderBits=1)
+    cv2.imwrite(filename, board_image)
+
+
+def calibrate_camera(frame_width, frame_height):
+    board = create_board()
 
     charuco_params = cv2.aruco.CharucoParameters()
     detector_params = cv2.aruco.DetectorParameters()
@@ -43,9 +51,6 @@ def calibrate_camera(frame_width, frame_height):
                 all_object_points.append(object_points)
                 all_image_points.append(image_points)
 
-        if key & 0xff == ord('s'):
-            cv2.imwrite('test.png', frame)
-
     cap.release()
     cv2.destroyAllWindows()
 
@@ -58,14 +63,14 @@ def calibrate_camera(frame_width, frame_height):
     return camera_matrix, distortion_coeffs
 
 
-def store_to_json(filename, camera_matrix: np.ndarray, distortion_coeffs: np.ndarray):
+def store_camera_to_json(filename, camera_matrix: np.ndarray, distortion_coeffs: np.ndarray):
     with open(filename, 'w') as f:
         data = {'camera_matrix': camera_matrix.tolist(),
                 'distortion_coeffs': distortion_coeffs.squeeze().tolist()}
         json.dump(data, f)
 
 
-def load_from_json(filename):
+def load_camera_from_json(filename) -> tuple[np.ndarray, np.ndarray]:
     with open(filename, 'r') as f:
         data = json.load(f)
         camera_matrix = np.array(data['camera_matrix'])

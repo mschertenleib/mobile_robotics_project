@@ -27,6 +27,10 @@ def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarra
     Checks for an intersection between the open segment ]a---b[ and closed segments [c[i]---d[i]]
     """
 
+    # NOTE: the explicit computations of cross and dot products here are for performance reasons. Calling np.cross() is
+    # about 2x slower than doing the product by hand, at least when done on arrays of 2D vectors.
+    # See tests/benchmark_intersection.py
+
     ab = b - a
     cd = d - c
     ac = c - a
@@ -41,13 +45,14 @@ def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarra
                     ((ad_ab >= 0) & (ac_ab <= 0)) | ((ad_ab <= 0) & (ac_ab >= 0)))):
         return True
 
+    # Detects intersections between colinear segments
     colinear_mask = (cb_cd == 0) & (ca_cd == 0) & (ad_ab == 0) & (ac_ab == 0)
     ac_dot_ab = ac[:, 0] * ab[0] + ac[:, 1] * ab[1]
     ab_dot_cd = ab[0] * cd[:, 0] + ab[1] * cd[:, 1]
     ab_dot_ab = ab[0] * ab[0] + ab[1] * ab[1]
-    mask_dir_same = (ab_dot_cd > 0) & (ac_dot_ab + ab_dot_cd > 0) & (ac_dot_ab - ab_dot_ab < 0)
-    mask_dir_opposite = (ab_dot_cd < 0) & (ac_dot_ab > 0) & (ac_dot_ab + ab_dot_cd - ab_dot_ab < 0)
-    return np.any(colinear_mask & (mask_dir_same | mask_dir_opposite))
+    mask_intersect_dir_same = (ab_dot_cd > 0) & (ac_dot_ab + ab_dot_cd > 0) & (ac_dot_ab - ab_dot_ab < 0)
+    mask_intersect_dir_opposite = (ab_dot_cd < 0) & (ac_dot_ab > 0) & (ac_dot_ab + ab_dot_cd - ab_dot_ab < 0)
+    return np.any(colinear_mask & (mask_intersect_dir_same | mask_intersect_dir_opposite))
 
 
 def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, regions: list[list[np.ndarray]]) -> bool:

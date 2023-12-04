@@ -12,7 +12,6 @@ def segments_intersect_cross(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.
     ad_ab = np.cross(d - a, ab)
     ac_ab = np.cross(ac, ab)
 
-    # Detects intersections between non-colinear segments
     if np.any(
             (((cb_cd >= 0) & (ca_cd < 0)) | ((cb_cd <= 0) & (ca_cd > 0))) & (
                     ((ad_ab > 0) & (ac_ab < 0)) | ((ad_ab < 0) & (ac_ab > 0)))):

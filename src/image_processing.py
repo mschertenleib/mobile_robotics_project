@@ -1,11 +1,8 @@
-import numpy as np
+from typing import *
+
 import cv2
-import typing
 
-
-def image_info(img: np.ndarray):
-    print(
-        f'dtype: {img.dtype}, shape: {img.shape}, min: {img.min()}, max: {img.max()}')
+from parameters import *
 
 
 def transform_perspective(matrix: np.ndarray, point: np.ndarray) -> np.ndarray:
@@ -36,30 +33,30 @@ def get_perspective_transform(map_corners: np.ndarray, dst_width: int, dst_heigh
     return cv2.getPerspectiveTransform(pts_src, pts_dst)
 
 
-def get_obstacle_mask(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
-                      robot_radius_px: int, target_position: typing.Optional[np.ndarray], target_radius_px: int,
-                      marker_size_px: int, map_width_px: int, map_height_px: int) -> np.ndarray:
+def get_obstacle_mask(img: np.ndarray, robot_position: Optional[np.ndarray],
+                      target_position: Optional[np.ndarray]) -> np.ndarray:
     """
     Returns a binary obstacle mask of the given color image, where 1 represents an obstacle.
-    A border is also added.
+    A border is also added. The four corner markers are not considered obstacles, as well as the robot and the target,
+    if their position is not None.
     """
 
-    threshold = 150
+    threshold = 200
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
 
-    # Mask out the robot, target and corner markers, to not consider them as obstacles
+    # Mask out the robot, target and corner markers, in order to not consider them as obstacles
     if robot_position is not None:
-        cv2.circle(img, center=robot_position.astype(np.int32), radius=robot_radius_px, color=[0], thickness=-1)
+        cv2.circle(img, center=robot_position.astype(np.int32), radius=ROBOT_RADIUS_PX, color=[0], thickness=-1)
     if target_position is not None:
-        cv2.circle(img, center=target_position.astype(np.int32), radius=target_radius_px, color=[0], thickness=-1)
-    cv2.rectangle(img, pt1=(0, 0), pt2=(marker_size_px, marker_size_px), color=[0], thickness=-1)
-    cv2.rectangle(img, pt1=(map_width_px - marker_size_px, 0), pt2=(map_width_px, marker_size_px), color=[0],
+        cv2.circle(img, center=target_position.astype(np.int32), radius=TARGET_RADIUS_PX, color=[0], thickness=-1)
+    cv2.rectangle(img, pt1=(0, 0), pt2=(MARKER_SIZE_PX, MARKER_SIZE_PX), color=[0], thickness=-1)
+    cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_SIZE_PX, 0), pt2=(MAP_WIDTH_PX, MARKER_SIZE_PX), color=[0],
                   thickness=-1)
-    cv2.rectangle(img, pt1=(0, map_height_px - marker_size_px), pt2=(marker_size_px, map_height_px), color=[0],
+    cv2.rectangle(img, pt1=(0, MAP_HEIGHT_PX - MARKER_SIZE_PX), pt2=(MARKER_SIZE_PX, MAP_HEIGHT_PX), color=[0],
                   thickness=-1)
-    cv2.rectangle(img, pt1=(map_width_px - marker_size_px, map_height_px - marker_size_px),
-                  pt2=(map_width_px, map_height_px), color=[0], thickness=-1)
+    cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_SIZE_PX, MAP_HEIGHT_PX - MARKER_SIZE_PX),
+                  pt2=(MAP_WIDTH_PX, MAP_HEIGHT_PX), color=[0], thickness=-1)
 
     # Filter isolated obstacle pixels
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -71,7 +68,7 @@ def get_obstacle_mask(img: np.ndarray, dilation_radius_px: int, robot_position: 
     img[0, :] = 1
     img[-1, :] = 1
 
-    dilation_kernel_size = 2 * dilation_radius_px + 1
+    dilation_kernel_size = 2 * DILATION_RADIUS_PX + 1
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_kernel_size, dilation_kernel_size))
     img = cv2.dilate(img, kernel)
 
@@ -83,6 +80,9 @@ def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
     Returns whether all map corners were detected and their position in image space.
     The corners are ordered clockwise, starting from the top left.
     """
+
+    # TODO: actually return the partial set of corners even if not all of them are detected, so we can display the ones
+    #  which were detected.
 
     if marker_ids is not None and len(marker_ids) >= 4:
         marker_indices = []

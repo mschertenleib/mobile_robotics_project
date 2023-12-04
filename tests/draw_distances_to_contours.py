@@ -1,6 +1,8 @@
-from global_map import *
-
 import cv2
+import numpy as np
+
+from global_map import distance_to_contours, extract_contours
+from test_global_map import get_obstacle_mask
 
 
 def draw_distance_to_contours(img_width: int, img_height: int, regions: list[list[cv2.typing.MatLike]]):
@@ -8,7 +10,7 @@ def draw_distance_to_contours(img_width: int, img_height: int, regions: list[lis
     for i in range(dist.shape[0]):
         for j in range(dist.shape[1]):
             for region_contours in regions:
-                distance, _ = distance_to_contours((j, i), region_contours)
+                distance, _ = distance_to_contours(np.array([j, i]), region_contours)
                 dist[i, j] = max(dist[i, j], distance)
 
     min_dist, max_dist, min_dist_pt, max_dist_pt = cv2.minMaxLoc(dist)

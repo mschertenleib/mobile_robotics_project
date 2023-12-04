@@ -24,8 +24,8 @@ def test_calibration(img_filename, camera_matrix: np.ndarray, distortion_coeffs:
 def main():
     camera_matrix, distortion_coeffs = calibrate_camera()
     json_filename = 'camera.json'
-    store_to_json(json_filename, camera_matrix, distortion_coeffs)
-    camera_matrix, distortion_coeffs = load_from_json(json_filename)
+    store_camera_to_json(json_filename, camera_matrix, distortion_coeffs)
+    camera_matrix, distortion_coeffs = load_camera_from_json(json_filename)
     test_calibration('../images/capture.png', camera_matrix, distortion_coeffs)
 
 

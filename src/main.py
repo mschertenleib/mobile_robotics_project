@@ -1,8 +1,6 @@
 from threading import Timer
-from typing import *
 
 import dearpygui.dearpygui as dpg
-import dearpygui.demo as demo
 from tdmclient import aw
 from tdmclient.atranspiler import ATranspiler
 
@@ -102,12 +100,11 @@ async def compile_run_python_for_thymio(node):
     return True
 
 
-def build_static_graph(img: np.ndarray, robot_position: typing.Optional[np.ndarray],
-                       target_position: typing.Optional[np.ndarray]) -> tuple[list[list[np.ndarray]], Graph]:
+def build_static_graph(img: np.ndarray, robot_position: Optional[np.ndarray],
+                       target_position: Optional[np.ndarray]) -> tuple[list[list[np.ndarray]], Graph]:
     # Note: the minimum distance to any obstacle is 'dilation_size_px - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    obstacle_mask = get_obstacle_mask(img, DILATION_RADIUS_PX, robot_position, ROBOT_RADIUS_PX, target_position,
-                                      TARGET_RADIUS_PX, MARKER_SIZE_PX, MAP_WIDTH_PX, MAP_HEIGHT_PX)
+    obstacle_mask = get_obstacle_mask(img, robot_position, target_position)
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
     graph = build_graph(regions)
     return regions, graph
@@ -370,7 +367,7 @@ def main():
     # camera_matrix, distortion_coeffs = calibrate_camera(frame_width, frame_height)
     # store_to_json('./camera.json', camera_matrix, distortion_coeffs)
     # return
-    camera_matrix, distortion_coeffs = load_from_json('./camera.json')
+    camera_matrix, distortion_coeffs = load_camera_from_json('./camera.json')
     new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs,
                                                            (MAP_WIDTH_PX, MAP_HEIGHT_PX), 0,
                                                            (MAP_WIDTH_PX, MAP_HEIGHT_PX))

@@ -10,7 +10,7 @@ def mouse_callback(event, x, y, flags, param):
 
 
 def main():
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(0)
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
