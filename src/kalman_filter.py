@@ -1,25 +1,21 @@
-import numpy as np
-
 from parameters import *
 
-# global parameters
-d = 100
-H = np.eye(3)
 
-r1 = 1.7
-r2 = 1.7
-r3 = 0.1
+def kalman_filter(measurements, mu_km, sig_km, u_k):
+    # global parameters
+    d = 100
+    H = np.eye(3)
+    r1 = 1.7
+    r2 = 1.7
+    r3 = 0.1
+    Q = np.array([[r1, 0, 0], [0, r2, 0], [0, 0, r3]])
+    R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
 
-Q = np.array([[r1, 0, 0], [0, r2, 0], [0, 0, r3]])
-R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
-
-
-def Algorithm_EKF(measurements, mu_km, sig_km, u_k):
-    ## Prediction through the a priori estimate
+    # Prediction through the a priori estimate
     # estimated mean of the state
     mu_k_pred = np.array([[0.0], [0.0], [0.0]])
-    mu_k_pred[0] = mu_km[0, 0] + (u_k[0] + u_k[1]) / 2 * SAMPLING_TIME * np.sin \
-        (mu_km[2, 0] + (u_k[0] - u_k[1]) / d * SAMPLING_TIME)
+    mu_k_pred[0] = mu_km[0, 0] + (u_k[0] + u_k[1]) / 2 * SAMPLING_TIME * np.sin(
+        mu_km[2, 0] + (u_k[0] - u_k[1]) / d * SAMPLING_TIME)
     mu_k_pred[1] = mu_km[1, 0] + (u_k[0] + u_k[1]) / 2 * SAMPLING_TIME * np.cos(
         mu_km[2, 0] + (u_k[0] - u_k[1]) / d * SAMPLING_TIME)
     mu_k_pred[2] = mu_km[2, 0] + (u_k[0] - u_k[1]) / d * SAMPLING_TIME
@@ -31,13 +27,14 @@ def Algorithm_EKF(measurements, mu_km, sig_km, u_k):
 
     # Estimated covariance of the state
     sig_k_pred = np.dot(G_k, np.dot(sig_km, G_k.T))
-    sig_k_pred = sig_k_pred + Q if type(Q) != type(None) else sig_k_pred
+    sig_k_pred = sig_k_pred + Q if Q is not None else sig_k_pred
 
     if True:  # camera:
         y = measurements
 
     else:
-        # if no measurements we consider our measurements to be the same as our a priori estimate as to cancel out the effect of innovation
+        # if no measurements we consider our measurements to be the same as our a priori estimate as to cancel out the
+        # effect of innovation
         y = mu_k_pred
         # print('y:',y)
         # print('--------')

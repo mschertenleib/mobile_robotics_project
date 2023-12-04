@@ -42,7 +42,7 @@ class Navigator:
         self.stored_target_position = np.zeros(2)
         self.free_target_position = np.zeros(2)
         self.prev_x_est = np.zeros((3, 1))
-        # 'straight line P_est convergence'
+        # P_est at convergence during straight line test
         self.prev_P_est = np.array([[4.12148917e-02, -1.07933653e-04, 4.21480900e-04],
                                     [-1.07933653e-04, 4.04040766e-02, -5.94141187e-05],
                                     [4.21480900e-04, -5.94141187e-05, 3.06223793e-02]])
@@ -97,14 +97,12 @@ async def compile_run_python_for_thymio(node):
     return True
 
 
-def build_static_graph(img: np.ndarray, dilation_radius_px: int, robot_position: typing.Optional[np.ndarray],
-                       robot_radius_px: int, target_position: typing.Optional[np.ndarray], target_radius_px: int,
-                       marker_size_px: int, map_width_px: int, map_height_px: int) -> tuple[
-    list[list[np.ndarray]], Graph]:
+def build_static_graph(img: np.ndarray, robot_position: typing.Optional[np.ndarray],
+                       target_position: typing.Optional[np.ndarray]) -> tuple[list[list[np.ndarray]], Graph]:
     # Note: the minimum distance to any obstacle is 'dilation_size_px - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    obstacle_mask = get_obstacle_mask(img, dilation_radius_px, robot_position, robot_radius_px, target_position,
-                                      target_radius_px, marker_size_px, map_width_px, map_height_px)
+    obstacle_mask = get_obstacle_mask(img, DILATION_RADIUS_PX, robot_position, ROBOT_RADIUS_PX, target_position,
+                                      TARGET_RADIUS_PX, MARKER_SIZE_PX, MAP_WIDTH_PX, MAP_HEIGHT_PX)
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
     graph = build_graph(regions)
     return regions, graph
@@ -167,7 +165,7 @@ def run_navigation(nav: Navigator):
         speed_left = int(nav.node["motor.left.speed"])
         speed_right = int(nav.node["motor.right.speed"])
         prev_input = np.array([speed_left * MMS_PER_MOTOR_SPEED, speed_right * MMS_PER_MOTOR_SPEED])
-        new_x_est, new_P_est = Algorithm_EKF(measurements, nav.prev_x_est, nav.prev_P_est, prev_input)
+        new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est, prev_input)
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
 
@@ -223,25 +221,19 @@ def run_local_navigation(loc_nav: LocalNavigator):
 async def main():
     nav = Navigator()
 
-    frame_width = 960
-    frame_height = 720
-    video_thread = VideoThread(frame_width, frame_height)
+    video_thread = VideoThread(FRAME_WIDTH, FRAME_HEIGHT)
 
-    map_width_mm = 972
-    map_height_mm = 671
-    map_width_px = 900
-    map_height_px = int(map_width_px * map_height_mm / map_width_mm)
-    nav.image_to_world = get_image_to_world_matrix(map_width_px, map_height_px, map_width_mm, map_height_mm)
-    nav.world_to_image = get_world_to_image_matrix(map_width_mm, map_height_mm, map_width_px, map_height_px)
+    nav.image_to_world = get_image_to_world_matrix(MAP_WIDTH_PX, MAP_HEIGHT_PX, MAP_WIDTH_MM, MAP_HEIGHT_MM)
+    nav.world_to_image = get_world_to_image_matrix(MAP_WIDTH_MM, MAP_HEIGHT_MM, MAP_WIDTH_PX, MAP_HEIGHT_PX)
 
     # Convention: in main(), all frame_* images are destined to image processing, and have no extra drawings on them.
     # All img_* images are the ones which have extra text, markers, etc. drawn on them.
 
-    frame = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+    frame = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
     frame_undistorted = np.zeros_like(frame)
     img_undistorted = np.zeros_like(frame)
 
-    nav.frame_map = np.zeros((map_height_px, map_width_px, 3), dtype=np.uint8)
+    nav.frame_map = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 3), dtype=np.uint8)
     nav.img_map = np.zeros_like(nav.frame_map)
 
     detector_params = cv2.aruco.DetectorParameters()
@@ -254,13 +246,8 @@ async def main():
     # return
     camera_matrix, distortion_coeffs = load_from_json('camera.json')
     new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs,
-                                                           (map_width_px, map_height_px), 0,
-                                                           (map_width_px, map_height_px))
-
-    dilation_radius_px = int((ROBOT_RADIUS + 10) / map_width_mm * map_width_px)
-    robot_radius_px = int((ROBOT_RADIUS + 20) / map_width_mm * map_width_px)
-    target_radius_px = int((TARGET_RADIUS + 10) / map_width_mm * map_width_px)
-    marker_size_px = int((MARKER_SIZE + 5) / map_width_mm * map_width_px)
+                                                           (MAP_WIDTH_PX, MAP_HEIGHT_PX), 0,
+                                                           (MAP_WIDTH_PX, MAP_HEIGHT_PX))
 
     client = ClientAsync()
     nav.node = await client.wait_for_node()
@@ -302,8 +289,8 @@ async def main():
                 cv2.drawMarker(img_undistorted, position=corner.astype(np.int32), color=(0, 0, 255),
                                markerType=cv2.MARKER_CROSS, thickness=2)
 
-            matrix = get_perspective_transform(map_corners, map_width_px, map_height_px)
-            cv2.warpPerspective(frame_undistorted, matrix, dsize=(map_width_px, map_height_px),
+            matrix = get_perspective_transform(map_corners, MAP_WIDTH_PX, MAP_HEIGHT_PX)
+            cv2.warpPerspective(frame_undistorted, matrix, dsize=(MAP_WIDTH_PX, MAP_HEIGHT_PX),
                                 dst=nav.frame_map)
 
         cv2.imshow('Undistorted frame', img_undistorted)
@@ -313,14 +300,8 @@ async def main():
             break
         elif key == ord('m'):
             nav.regions, nav.graph = build_static_graph(nav.frame_map,
-                                                        dilation_radius_px,
                                                         nav.robot_position if nav.robot_found else None,
-                                                        robot_radius_px,
-                                                        nav.target_position if nav.target_found else None,
-                                                        target_radius_px,
-                                                        marker_size_px,
-                                                        map_width_px,
-                                                        map_height_px)
+                                                        nav.target_position if nav.target_found else None)
         elif key == ord('u'):
             if nav.robot_found and nav.target_found:
                 nav.stored_robot_position = nav.robot_position
