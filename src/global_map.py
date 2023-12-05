@@ -1,5 +1,3 @@
-import cv2.typing
-
 from image_processing import *
 
 
@@ -55,16 +53,15 @@ def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarra
     return np.any(colinear_mask & (mask_intersect_dir_same | mask_intersect_dir_opposite))
 
 
-def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, regions: list[list[np.ndarray]]) -> bool:
+def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours: list[np.ndarray]) -> bool:
     """
     Checks for an intersection between the open segment ]pt1---pt2[ and all contours
     """
-    for region in regions:
-        for contour in region:
-            if segments_intersect(pt1, pt2, contour[:-1], contour[1:]):
-                return True
-            if segments_intersect(pt1, pt2, np.array([contour[-1]]), np.array([contour[0]])):
-                return True
+    for contour in contours:
+        if segments_intersect(pt1, pt2, contour[:-1], contour[1:]):
+            return True
+        if segments_intersect(pt1, pt2, np.array([contour[-1]]), np.array([contour[0]])):
+            return True
     return False
 
 
@@ -104,24 +101,22 @@ def extract_contours(obstacle_mask: np.ndarray, epsilon: float) -> list[list[np.
     return regions
 
 
-def extract_convex_vertices(regions: list[list[np.ndarray]]) -> tuple[
-    list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+def extract_convex_vertices(contours: list[np.ndarray]) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     vertices = []
     to_prev = []
     to_next = []
-    for region in regions:
-        for contour in region:
-            for i in range(len(contour)):
-                to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
-                to_next_i = contour[(i + 1) % len(contour)] - contour[i]
-                if np.cross(to_prev_i, to_next_i) <= 0:
-                    vertices.append(contour[i])
-                    to_prev.append(to_prev_i)
-                    to_next.append(to_next_i)
+    for contour in contours:
+        for i in range(len(contour)):
+            to_prev_i = contour[i - 1 if i > 0 else len(contour) - 1] - contour[i]
+            to_next_i = contour[(i + 1) % len(contour)] - contour[i]
+            if np.cross(to_prev_i, to_next_i) <= 0:
+                vertices.append(contour[i])
+                to_prev.append(to_prev_i)
+                to_next.append(to_next_i)
     return vertices, to_prev, to_next
 
 
-def extract_static_adjacency(regions: list[list[np.ndarray]], vertices: list[np.ndarray], to_prev: list[np.ndarray],
+def extract_static_adjacency(contours: list[np.ndarray], vertices: list[np.ndarray], to_prev: list[np.ndarray],
                              to_next: list[np.ndarray]) -> list[list[Edge]]:
     adjacency = [[] for _ in range(len(vertices))]
     for i in range(len(vertices)):
@@ -144,7 +139,7 @@ def extract_static_adjacency(regions: list[list[np.ndarray]], vertices: list[np.
             is_i_prev_j = np.all(to_prev[j] == -edge)
             is_i_next_j = np.all(to_next[j] == -edge)
             are_pts_connected = (is_j_prev_i or is_j_next_i) and (is_i_prev_j or is_i_next_j)
-            if not are_pts_connected and segment_intersects_contours(vertices[i], vertices[j], regions):
+            if not are_pts_connected and segment_intersects_contours(vertices[i], vertices[j], contours):
                 continue
 
             edge_length = np.linalg.norm(edge)
@@ -156,6 +151,14 @@ def extract_static_adjacency(regions: list[list[np.ndarray]], vertices: list[np.
 
 def extract_dynamic_edges(regions: list[list[np.ndarray]], vertices: list[np.ndarray], to_prev: list[np.ndarray],
                           to_next: list[np.ndarray], point: np.ndarray) -> list[Edge]:
+    # NOTE: we need to check for an intersection with all contours from all regions, because we consider all vertices
+    # of the graph, not only those in the same region as the point. If we wanted to consider only the latter (which we
+    # could), we would need a way to extract the subset of vertices from the graph corresponding to our region.
+    # Alternatively, and perhaps more intuitively, building one graph per region would give the same benefits and might
+    # be interesting. This however is fundamentally just an optimization over what we already have here, and goes beyond
+    # the scope of what is needed for this project.
+    all_contours = [contour for region in regions for contour in region]
+
     edges = []
     for i in range(len(vertices)):
 
@@ -170,7 +173,7 @@ def extract_dynamic_edges(regions: list[list[np.ndarray]], vertices: list[np.nda
         is_pt_prev_i = np.all(to_prev[i] == -edge)
         is_pt_next_i = np.all(to_next[i] == -edge)
         are_pts_connected = is_pt_prev_i or is_pt_next_i
-        if not are_pts_connected and segment_intersects_contours(point, vertices[i], regions):
+        if not are_pts_connected and segment_intersects_contours(point, vertices[i], all_contours):
             continue
 
         edge_length = np.linalg.norm(edge)
@@ -180,32 +183,49 @@ def extract_dynamic_edges(regions: list[list[np.ndarray]], vertices: list[np.nda
 
 
 def build_graph(regions: list[list[np.ndarray]]) -> Graph:
-    vertices, to_prev, to_next = extract_convex_vertices(regions)
-    adjacency = extract_static_adjacency(regions, vertices, to_prev, to_next)
-    # Reserve source and target vertices
-    vertices += [[], []]
-    adjacency += [[], []]
     graph = Graph()
-    graph.vertices = vertices
-    graph.adjacency = adjacency
-    graph.to_prev = to_prev
-    graph.to_next = to_next
+
+    # For the current region being processed, keep track of the index of its first vertex in the graph
+    region_first_vertex = 0
+
+    # Process each region separately, because each region essentially has its own local visibility graph, isolated from
+    # other regions. This also improves performance, by limiting the various computations on vertices/edges to only the
+    # ones contained in the region.
+    for region_contours in regions:
+        vertices, to_prev, to_next = extract_convex_vertices(region_contours)
+        adjacency = extract_static_adjacency(region_contours, vertices, to_prev, to_next)
+
+        # NOTE: += on lists concatenates them, this is not an actual addition
+        graph.vertices += vertices
+        graph.to_prev += to_prev
+        graph.to_next += to_next
+        # Add the region's first vertex index to each vertex index in the adjacency list, before appending it to the
+        # graph's global adjacency list
+        graph.adjacency += [[Edge(edge.vertex + region_first_vertex, edge.length) for edge in edges] for edges in
+                            adjacency]
+
+        region_first_vertex += len(vertices)
+
+    # Reserve source (robot) and target vertices at the end of the graph lists. This dynamic part of the graph is
+    # updated separately, since this update is done much more frequently than the full graph build.
+    graph.vertices += [[], []]
+    graph.adjacency += [[], []]
+
     return graph
 
 
 def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarray, target: np.ndarray) -> tuple[
     np.ndarray, np.ndarray]:
     """
-    Update the dynamic part of the graph. The considered vertices to be added in the graph are source and target,
-    but the visibility edges are extracted from free_source and free_target, which should be outside any obstacle.
-    This allows for source and target to be in obstacles, while behaving as if they were outside.
+    Updates the dynamic part of the graph. Also returns free_source and free_target, which are versions of source and
+    target which are projected on obstacle boundaries, if they happen to be inside one.
     """
 
     free_source, source_region_index, source_contour_index, source_vertex_index = push_out(source, regions)
     free_target, target_region_index, target_contour_index, target_vertex_index = push_out(target, regions)
 
     # Remove old dynamic edges
-    # NOTE: this relies on dynamic edges being the last ones in the neighbor lists
+    # NOTE: this relies on dynamic edges being the last ones in the adjacency lists
     for edge in graph.adjacency[Graph.SOURCE]:
         del graph.adjacency[edge.vertex][-1]
     for edge in graph.adjacency[Graph.TARGET]:
@@ -223,48 +243,10 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
     for edge in graph.adjacency[Graph.TARGET]:
         graph.adjacency[edge.vertex].append(Edge(vertex=Graph.TARGET, length=edge.length))
 
-    # Add the direct edge from source to target, if valid
-    add_source_to_target = True
-    if source_vertex_index >= 0 and target_vertex_index >= 0:
-        # If both source and target have been projected to contour vertices, we must perform the same checks
-        # we would do in extract_static_adjacency(), or we might falsely include the edge if it goes through a contour
-        # without intersecting it.
-
-        source_contour = regions[source_region_index][source_contour_index]
-        target_contour = regions[target_region_index][target_contour_index]
-        source_vertex = source_contour[source_vertex_index]
-        source_to_prev = source_contour[source_vertex_index - 1 if source_vertex_index > 0 else len(
-            source_contour) - 1] - source_vertex
-        source_to_next = source_contour[(source_vertex_index + 1) % len(source_contour)] - source_vertex
-        target_vertex = target_contour[target_vertex_index]
-        target_to_prev = target_contour[target_vertex_index - 1 if target_vertex_index > 0 else len(
-            target_contour) - 1] - target_vertex
-        target_to_next = target_contour[(target_vertex_index + 1) % len(target_contour)] - target_vertex
-
-        edge = target_vertex - source_vertex
-        sin_prev_target = np.cross(edge, target_to_prev)
-        sin_next_target = np.cross(edge, target_to_next)
-        if sin_prev_target < 0 < sin_next_target:
-            # FIXME: we need a way to short-circuit out of here
-            add_source_to_target = False
-        sin_prev_source = np.cross(edge, source_to_prev)
-        sin_next_source = np.cross(edge, source_to_next)
-        if sin_prev_source > 0 > sin_next_source:
-            add_source_to_target = False
-
-        is_target_prev_source = np.all(source_to_prev == edge)
-        is_target_next_source = np.all(source_to_next == edge)
-        is_source_prev_target = np.all(target_to_prev == -edge)
-        is_source_next_target = np.all(target_to_next == -edge)
-        are_vertices_connected = (is_target_prev_source or is_target_next_source) and (
-                is_source_prev_target or is_source_next_target)
-        if not are_vertices_connected and segment_intersects_contours(source_vertex, target_vertex, regions):
-            add_source_to_target = False
-
-    elif segment_intersects_contours(free_source, free_target, regions):
-        add_source_to_target = False
-
-    if add_source_to_target:
+    # Add the direct edge from source to target, if applicable
+    if should_add_source_to_target_edge(regions, free_source, source_region_index, source_contour_index,
+                                        source_vertex_index, free_target, target_region_index, target_contour_index,
+                                        target_vertex_index):
         edge_length = np.linalg.norm(free_target - free_source)
         graph.adjacency[Graph.SOURCE].append(Edge(vertex=Graph.TARGET, length=edge_length))
         graph.adjacency[Graph.TARGET].append(Edge(vertex=Graph.SOURCE, length=edge_length))
@@ -273,6 +255,65 @@ def update_graph(graph: Graph, regions: list[list[np.ndarray]], source: np.ndarr
     graph.vertices[Graph.TARGET] = free_target
 
     return free_source, free_target
+
+
+def should_add_source_to_target_edge(regions: list[list[np.ndarray]], free_source: np.ndarray, source_region_index: int,
+                                     source_contour_index: int, source_vertex_index: int, free_target: np.ndarray,
+                                     target_region_index: int, target_contour_index: int,
+                                     target_vertex_index: int) -> bool:
+    # If the source and target do not lie within the same region, they obviously cannot be connected
+    if source_region_index != target_region_index:
+        return False
+
+    region_index = source_region_index
+
+    # If at least one of the two points has not been projected to a contour vertex, just do an intersection check
+    if source_vertex_index < 0 or target_vertex_index < 0:
+        return not segment_intersects_contours(free_source, free_target, regions[region_index])
+
+    # If both source and target have been projected to contour vertices, we must perform the same checks
+    # we would do in extract_static_adjacency(), or we might falsely include the edge if it goes through a contour
+    # without intersecting it.
+
+    source_contour = regions[region_index][source_contour_index]
+    target_contour = regions[region_index][target_contour_index]
+    source_vertex = source_contour[source_vertex_index]
+    source_to_prev = source_contour[source_vertex_index - 1 if source_vertex_index > 0 else len(
+        source_contour) - 1] - source_vertex
+    source_to_next = source_contour[(source_vertex_index + 1) % len(source_contour)] - source_vertex
+    target_vertex = target_contour[target_vertex_index]
+    target_to_prev = target_contour[target_vertex_index - 1 if target_vertex_index > 0 else len(
+        target_contour) - 1] - target_vertex
+    target_to_next = target_contour[(target_vertex_index + 1) % len(target_contour)] - target_vertex
+    edge = target_vertex - source_vertex
+
+    # This detects if the edge goes towards the interior of the contour 'source' belongs to
+    sin_prev_source = np.cross(edge, source_to_prev)
+    sin_next_source = np.cross(edge, source_to_next)
+    is_source_convex = np.cross(source_to_prev, source_to_next) <= 0
+    if is_source_convex and sin_prev_source > 0 > sin_next_source:
+        return False
+    if not is_source_convex and not (sin_prev_source <= 0 <= sin_next_source):
+        return False
+
+    # This detects if the edge goes towards the interior of the contour 'target' belongs to
+    sin_prev_target = np.cross(edge, target_to_prev)
+    sin_next_target = np.cross(edge, target_to_next)
+    is_target_convex = np.cross(target_to_prev, target_to_next) <= 0
+    if is_target_convex and sin_prev_target < 0 < sin_next_target:
+        return False
+    if not is_target_convex and not (sin_prev_target >= 0 >= sin_next_target):
+        return False
+
+    # If source and target have been projected to connected vertices on the same contour, we must include the edge.
+    # We must not perform an intersection check in this case, because it would return True.
+    if source_contour_index == target_contour_index and (
+            source_vertex_index == (target_vertex_index + 1) % len(target_contour) or target_vertex_index == (
+            source_vertex_index + 1) % len(source_contour)):
+        return True
+
+    # If none of the previous checks returned, do an intersection check
+    return not segment_intersects_contours(source_vertex, target_vertex, regions[region_index])
 
 
 def draw_graph(img: np.ndarray, graph: Graph):
@@ -455,7 +496,7 @@ def project(pt: np.ndarray, contour: np.ndarray) -> tuple[np.ndarray, int]:
             distance = np.linalg.norm(to_vertex_2)
             if distance < min_distance:
                 closest_point = vertex_2
-                vertex_index = index_vertex_1
+                vertex_index = index_vertex_2
                 min_distance = distance
 
     return closest_point, vertex_index
