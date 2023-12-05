@@ -43,5 +43,5 @@ MARKER_SIZE_PX = int((MARKER_SIZE_MM + 5) / MAP_WIDTH_MM * MAP_WIDTH_PX)
 KALMAN_Q = 2 * np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
 KALMAN_R = 10 * np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
 
-# Kidnapping
-KIDNAPPING_DELTA = 50
+# Path re-planning condition
+DELTA_TO_PLAN_PATH_AGAIN_MM = 40

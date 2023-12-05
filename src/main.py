@@ -24,7 +24,6 @@ class Navigator:
         self.node = None
         self.requires_first_measurement = True
         self.map_found = False
-        self.was_robot_detected_last_frame = False
         # BGR u8 undistorted and perspective corrected image destined to image processing
         self.frame_map = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 3), dtype=np.uint8)
         # BGR u8 image destined to be displayed
@@ -111,15 +110,7 @@ def build_static_graph(nav: Navigator):
     nav.graph = build_graph(nav.regions)
 
 
-def callback_button_build_map(sender, app_data, user_data):
-    assert isinstance(user_data, Navigator)
-    build_static_graph(user_data)
-
-
-# FIXME: temporary
-def callback_update_graph(sender, app_data, user_data):
-    assert isinstance(user_data, Navigator)
-    nav = user_data
+def build_dynamic_graph_and_plan_path(nav: Navigator):
     if nav.robot_found and nav.target_found:
         nav.stored_robot_position = nav.robot_position
         nav.stored_target_position = nav.target_position
@@ -133,6 +124,11 @@ def callback_update_graph(sender, app_data, user_data):
                 [transform_affine(nav.image_to_world, nav.graph.vertices[nav.path_image[i]]) for i in
                  range(1, len(nav.path_image))])
             nav.path_index = 0
+
+
+def callback_button_build_map(sender, app_data, user_data):
+    assert isinstance(user_data, Navigator)
+    build_static_graph(user_data)
 
 
 def draw_static_graph(img: np.ndarray, graph: Graph, regions: list[list[np.ndarray]]):
@@ -205,15 +201,16 @@ def update_plots(nav: Navigator):
     time_data = np.array(nav.sample_time_history)[-num_samples_to_plot:].tolist()
     estimated_pose_arr = np.array(nav.estimated_pose_history)[-num_samples_to_plot:]
     measured_pose_arr = np.array(nav.measured_pose_history)[-num_samples_to_plot:]
-    estimated_theta_degrees = np.rad2deg(estimated_pose_arr[:, 2])[-num_samples_to_plot:]
-    measured_theta_degrees = np.rad2deg(measured_pose_arr[:, 2])[-num_samples_to_plot:]
 
     dpg.set_value('tag_series_x_est', [time_data, estimated_pose_arr[:, 0].tolist()])
     dpg.set_value('tag_series_y_est', [time_data, estimated_pose_arr[:, 1].tolist()])
+    dpg.set_value('tag_series_theta_est', [time_data, estimated_pose_arr[:, 2].tolist()])
     dpg.set_value('tag_series_x_meas', [time_data, measured_pose_arr[:, 0].tolist()])
     dpg.set_value('tag_series_y_meas', [time_data, measured_pose_arr[:, 1].tolist()])
-    dpg.set_value('tag_series_theta_est', [time_data, estimated_theta_degrees.tolist()])
-    dpg.set_value('tag_series_theta_meas', [time_data, measured_theta_degrees.tolist()])
+    dpg.set_value('tag_series_theta_meas', [time_data, measured_pose_arr[:, 2].tolist()])
+
+    if not dpg.get_value('tag_checkbox_autofit'):
+        return
 
     # Set limits on the time axis (will automatically change the time axis of the other plot, since they are linked)
     dpg.set_axis_limits('tag_plot_xy_axis_x', time_data[0], time_data[-1])
@@ -221,8 +218,8 @@ def update_plots(nav: Navigator):
     # Set limits on the y axes
     min_pos = min(np.min(estimated_pose_arr[:, :2]), np.min(measured_pose_arr[:, :2]))
     max_pos = max(np.max(estimated_pose_arr[:, :2]), np.max(measured_pose_arr[:, :2]))
-    min_theta = min(np.min(estimated_theta_degrees), np.min(measured_theta_degrees))
-    max_theta = max(np.max(estimated_theta_degrees), np.max(measured_theta_degrees))
+    min_theta = min(np.min(estimated_pose_arr[:, 2]), np.min(measured_pose_arr[:, 2]))
+    max_theta = max(np.max(estimated_pose_arr[:, 2]), np.max(measured_pose_arr[:, 2]))
     pos_range = max_pos - min_pos
     theta_range = max_theta - min_theta
     ymin_xy = min_pos - pos_range * 0.1 if pos_range > 0 else min_pos - 1
@@ -254,7 +251,6 @@ def build_interface(nav: Navigator):
 
     with dpg.window(label='Map', tag='tag_map_window', no_close=True):
         dpg.add_button(label='Build map', callback=callback_button_build_map, user_data=nav)
-        dpg.add_button(label='Update graph', callback=callback_update_graph, user_data=nav)
         with dpg.plot(label='Map', tag='tag_map_plot', equal_aspects=True):
             dpg.add_plot_axis(dpg.mvXAxis, label='X [mm]', tag='tag_map_axis_x')
             with dpg.plot_axis(dpg.mvYAxis, label='Y [mm]', tag='tag_map_axis_y'):
@@ -264,6 +260,7 @@ def build_interface(nav: Navigator):
     with dpg.window(label='Plots', tag='tag_plot_window', no_close=True):
         dpg.add_slider_int(label='Samples to plot', tag='tag_samples_slider', default_value=300, min_value=10,
                            max_value=1200)
+        dpg.add_checkbox(label='Auto-fit axes', tag='tag_checkbox_autofit', default_value=True)
         with dpg.subplots(2, 1, label='', width=-1, height=-1, link_all_x=True):
             with dpg.plot(label='XY plot', tag='tag_plot_xy', width=-1, height=-1):
                 dpg.add_plot_legend()
@@ -321,23 +318,30 @@ def run_navigation(nav: Navigator):
                 nav.prev_x_est[:] = measurements
                 nav.requires_first_measurement = False
 
+    should_replan_path = False
+
     # We need at least one measurement from the camera to start estimating our state, else we would not know where to
     # start (the initial position of the robot can be completely random).
     if not nav.requires_first_measurement:
-        speed_left = int(nav.node['motor.left.speed'])
-        speed_right = int(nav.node['motor.right.speed'])
-        prev_input = np.array([speed_left * MMS_PER_MOTOR_SPEED, speed_right * MMS_PER_MOTOR_SPEED])
-        new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est, prev_input)
-        if np.linalg.norm(new_x_est.flatten()[:2] - nav.prev_x_est.flatten()[:2]) > KIDNAPPING_DELTA:
-            print(f'{new_x_est.flatten().item(0)} AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+        speed_left = int(nav.node.v.motor.left.speed) * MMS_PER_MOTOR_SPEED
+        speed_right = int(nav.node.v.motor.right.speed) * MMS_PER_MOTOR_SPEED
+        new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est,
+                                             np.array([speed_left, speed_right]))
+        if np.linalg.norm(new_x_est.flatten()[:2] - nav.prev_x_est.flatten()[:2]) >= DELTA_TO_PLAN_PATH_AGAIN_MM:
+            should_replan_path = True
 
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
         estimated_state = new_x_est.flatten()
 
         nav.sample_time_history.append(time.time() - nav.start_time)
-        nav.measured_pose_history.append(measurements.flatten() if measurements is not None else np.zeros(3))
+        if measurements is not None:
+            nav.measured_pose_history.append(measurements.flatten())
+            nav.measured_pose_history[-1][2] = np.rad2deg(nav.measured_pose_history[-1][2])
+        else:
+            nav.measured_pose_history.append(np.zeros(3))
         nav.estimated_pose_history.append(estimated_state)
+        nav.estimated_pose_history[-1][2] = np.rad2deg(nav.estimated_pose_history[-1][2])
         update_plots(nav)
 
         cv2.drawMarker(nav.img_map, position=transform_affine(nav.world_to_image, np.array(
@@ -348,6 +352,9 @@ def run_navigation(nav: Navigator):
         outline = np.array([transform_affine(nav.world_to_image, pt) for pt in outline], dtype=np.int32)
         cv2.polylines(nav.img_map, [outline], isClosed=True, color=(64, 192, 64), thickness=2,
                       lineType=cv2.LINE_AA)
+
+        if should_replan_path:
+            build_dynamic_graph_and_plan_path(nav)
 
         if nav.path_world is not None and len(nav.path_world) > 0:
             nav.prev_x_est = nav.prev_x_est.tolist()
@@ -376,10 +383,6 @@ def run_navigation(nav: Navigator):
                 draw_path(nav.img_map, nav.graph, nav.path_image, nav.stored_robot_position, nav.free_robot_position,
                           nav.stored_target_position, nav.free_target_position)
 
-    if nav.map_found and nav.robot_found:
-        nav.was_robot_detected_last_frame = True
-    else:
-        nav.was_robot_detected_last_frame = False
     nav.map_rgba_f32[:, :, 2::-1] = nav.img_map / 255.0
     dpg.set_value('tag_map_texture', nav.map_rgba_f32.flatten())
 
@@ -443,12 +446,12 @@ def main():
     dpg.create_context()
     build_interface(nav)
 
-    # nav.start_time is just the reference for t=0.0 on the plots
+    # nav.start_time is just the reference for t=0 on the plots
     nav.start_time = time.time()
 
     while dpg.is_dearpygui_running():
         # Give the client the occasion to handle its work
-        aw(client.sleep(0.01))
+        aw(client.sleep(0.005))
 
         # Get the latest frame
         is_frame_new = video_thread.get_frame(frame)
