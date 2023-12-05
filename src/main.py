@@ -198,9 +198,9 @@ def update_plots(nav: Navigator):
 
     num_samples_to_plot = dpg.get_value('tag_samples_slider')
     num_samples_to_plot = min(num_samples_to_plot, len(nav.sample_time_history))
-    time_data = np.array(nav.sample_time_history)[-num_samples_to_plot:].tolist()
-    estimated_pose_arr = np.array(nav.estimated_pose_history)[-num_samples_to_plot:]
-    measured_pose_arr = np.array(nav.measured_pose_history)[-num_samples_to_plot:]
+    time_data = nav.sample_time_history
+    estimated_pose_arr = np.array(nav.estimated_pose_history)
+    measured_pose_arr = np.array(nav.measured_pose_history)
 
     dpg.set_value('tag_series_x_est', [time_data, estimated_pose_arr[:, 0].tolist()])
     dpg.set_value('tag_series_y_est', [time_data, estimated_pose_arr[:, 1].tolist()])
@@ -209,25 +209,31 @@ def update_plots(nav: Navigator):
     dpg.set_value('tag_series_y_meas', [time_data, measured_pose_arr[:, 1].tolist()])
     dpg.set_value('tag_series_theta_meas', [time_data, measured_pose_arr[:, 2].tolist()])
 
-    if not dpg.get_value('tag_checkbox_autofit'):
-        return
+    if dpg.get_value('tag_checkbox_autofit'):
+        # Set limits on the time axis (will automatically change the time axis of the other plot, since they are linked)
+        dpg.set_axis_limits('tag_plot_xy_axis_x', time_data[-num_samples_to_plot], time_data[-1])
 
-    # Set limits on the time axis (will automatically change the time axis of the other plot, since they are linked)
-    dpg.set_axis_limits('tag_plot_xy_axis_x', time_data[0], time_data[-1])
-
-    # Set limits on the y axes
-    min_pos = min(np.min(estimated_pose_arr[:, :2]), np.min(measured_pose_arr[:, :2]))
-    max_pos = max(np.max(estimated_pose_arr[:, :2]), np.max(measured_pose_arr[:, :2]))
-    min_theta = min(np.min(estimated_pose_arr[:, 2]), np.min(measured_pose_arr[:, 2]))
-    max_theta = max(np.max(estimated_pose_arr[:, 2]), np.max(measured_pose_arr[:, 2]))
-    pos_range = max_pos - min_pos
-    theta_range = max_theta - min_theta
-    ymin_xy = min_pos - pos_range * 0.1 if pos_range > 0 else min_pos - 1
-    ymax_xy = max_pos + pos_range * 0.1 if pos_range > 0 else max_pos + 1
-    ymin_theta = min_theta - theta_range * 0.1 if theta_range > 0 else min_theta - 1
-    ymax_theta = max_theta + theta_range * 0.1 if theta_range > 0 else max_theta + 1
-    dpg.set_axis_limits('tag_plot_xy_axis_y', ymin_xy, ymax_xy)
-    dpg.set_axis_limits('tag_plot_theta_axis_y', ymin_theta, ymax_theta)
+        # Set limits on the y axes
+        min_pos = min(np.min(estimated_pose_arr[-num_samples_to_plot:, :2]),
+                      np.min(measured_pose_arr[-num_samples_to_plot:, :2]))
+        max_pos = max(np.max(estimated_pose_arr[-num_samples_to_plot:, :2]),
+                      np.max(measured_pose_arr[-num_samples_to_plot:, :2]))
+        min_theta = min(np.min(estimated_pose_arr[-num_samples_to_plot:, 2]),
+                        np.min(measured_pose_arr[-num_samples_to_plot:, 2]))
+        max_theta = max(np.max(estimated_pose_arr[-num_samples_to_plot:, 2]),
+                        np.max(measured_pose_arr[-num_samples_to_plot:, 2]))
+        pos_range = max_pos - min_pos
+        theta_range = max_theta - min_theta
+        ymin_xy = min_pos - pos_range * 0.1 if pos_range > 0 else min_pos - 1
+        ymax_xy = max_pos + pos_range * 0.1 if pos_range > 0 else max_pos + 1
+        ymin_theta = min_theta - theta_range * 0.1 if theta_range > 0 else min_theta - 1
+        ymax_theta = max_theta + theta_range * 0.1 if theta_range > 0 else max_theta + 1
+        dpg.set_axis_limits('tag_plot_xy_axis_y', ymin_xy, ymax_xy)
+        dpg.set_axis_limits('tag_plot_theta_axis_y', ymin_theta, ymax_theta)
+    else:
+        dpg.set_axis_limits_auto('tag_plot_xy_axis_x')
+        dpg.set_axis_limits_auto('tag_plot_xy_axis_y')
+        dpg.set_axis_limits_auto('tag_plot_theta_axis_y')
 
 
 def build_interface(nav: Navigator):
