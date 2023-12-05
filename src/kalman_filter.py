@@ -3,8 +3,8 @@ from typing import Optional
 from parameters import *
 
 
-def kalman_filter(measurements: Optional[np.ndarray], mu_km: np.ndarray, sig_km: np.ndarray,
-                  u_k: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def kalman_filter(measurements: Optional[np.ndarray], mu_km: np.ndarray, sig_km: np.ndarray, speed_left: float,
+                  speed_right: float) -> tuple[np.ndarray, np.ndarray]:
     # Since our discretized motion model does not perfectly match reality, try to correct it by some extent.
     # Since forward Euler integration tends to extrapolate "too far" for smooth trajectories, artificially reduce the
     # contribution of the derivative to the state update. Note that this is just a "hack" that seems to work well enough
@@ -14,21 +14,23 @@ def kalman_filter(measurements: Optional[np.ndarray], mu_km: np.ndarray, sig_km:
     # frequency.
     EFFECTIVE_SAMPLING_TIME = SAMPLING_TIME * 0.8
 
+    tangential_speed = (speed_left + speed_right) / 2
+    angular_speed = (speed_right - speed_left) / ROBOT_WHEEL_SPACING
+    delta_angle = angular_speed * EFFECTIVE_SAMPLING_TIME
     # Prediction through the a priori estimate
+    x_est = mu_km[0, 0]
+    y_est = mu_km[1, 0]
+    angle_est = mu_km[2, 0]
     # Estimated mean of the state
     mu_k_pred = np.array([[0.0], [0.0], [0.0]])
-    mu_k_pred[0] = mu_km[0, 0] + (u_k[0] + u_k[1]) / 2 * EFFECTIVE_SAMPLING_TIME * -np.sin(
-        mu_km[2, 0] - (u_k[0] - u_k[1]) / ROBOT_WHEEL_SPACING * EFFECTIVE_SAMPLING_TIME)
-    mu_k_pred[1] = mu_km[1, 0] + (u_k[0] + u_k[1]) / 2 * EFFECTIVE_SAMPLING_TIME * np.cos(
-        mu_km[2, 0] - (u_k[0] - u_k[1]) / ROBOT_WHEEL_SPACING * EFFECTIVE_SAMPLING_TIME)
-    mu_k_pred[2] = mu_km[2, 0] - (u_k[0] - u_k[1]) / ROBOT_WHEEL_SPACING * EFFECTIVE_SAMPLING_TIME
+    mu_k_pred[0] = x_est + tangential_speed * EFFECTIVE_SAMPLING_TIME * -np.sin(angle_est + delta_angle)
+    mu_k_pred[1] = y_est + tangential_speed * EFFECTIVE_SAMPLING_TIME * np.cos(angle_est + delta_angle)
+    mu_k_pred[2] = angle_est + delta_angle
 
     # Jacobian of the motion model
     G_k = np.eye(3)
-    G_k[0, 2] = -(u_k[0] + u_k[1]) / 2 * np.cos(
-        mu_km[2, 0] - (u_k[0] - u_k[1]) / ROBOT_WHEEL_SPACING * EFFECTIVE_SAMPLING_TIME)
-    G_k[1, 2] = -(u_k[0] + u_k[1]) / 2 * np.sin(
-        mu_km[2, 0] - (u_k[0] - u_k[1]) / ROBOT_WHEEL_SPACING * EFFECTIVE_SAMPLING_TIME)
+    G_k[0, 2] = -tangential_speed * np.cos(angle_est + delta_angle)
+    G_k[1, 2] = -tangential_speed * np.sin(angle_est + delta_angle)
 
     # Estimated covariance of the state
     sig_k_pred = G_k @ sig_km @ G_k.T

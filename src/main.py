@@ -331,8 +331,7 @@ def run_navigation(nav: Navigator):
     if not nav.requires_first_measurement:
         speed_left = int(nav.node.v.motor.left.speed) * MMS_PER_MOTOR_SPEED
         speed_right = int(nav.node.v.motor.right.speed) * MMS_PER_MOTOR_SPEED
-        new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est,
-                                             np.array([speed_left, speed_right]))
+        new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est, speed_left, speed_right)
         if np.linalg.norm(new_x_est.flatten()[:2] - nav.prev_x_est.flatten()[:2]) >= DELTA_TO_PLAN_PATH_AGAIN_MM:
             should_replan_path = True
 
