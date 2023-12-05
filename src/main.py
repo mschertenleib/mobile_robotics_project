@@ -20,6 +20,7 @@ class Navigator:
     """
 
     def __init__(self):
+        self.start_time = time.time()
         self.node = None
         self.first_estimate = True
         # BGR u8 image destined to image processing
@@ -51,10 +52,9 @@ class Navigator:
         self.prev_P_est = np.array([[4.12148917e-02, -1.07933653e-04, 4.21480900e-04],
                                     [-1.07933653e-04, 4.04040766e-02, -5.94141187e-05],
                                     [4.21480900e-04, -5.94141187e-05, 3.06223793e-02]])
-        self.prev_input = np.zeros(2)
-        self.angle_error = 0.0
-        self.dist_error = 0.0
-        self.switch = 0
+        self.sample_time_history = []
+        self.estimated_pose_history = []
+        self.measured_pose_history = []
 
 
 class LocalNavigator:
@@ -102,24 +102,21 @@ async def compile_run_python_for_thymio(node):
     return True
 
 
-def build_static_graph(img: np.ndarray, robot_position: Optional[np.ndarray],
-                       target_position: Optional[np.ndarray]) -> tuple[list[list[np.ndarray]], Graph]:
-    # Note: the minimum distance to any obstacle is 'dilation_size_px - approx_poly_epsilon'
+def build_static_graph(nav: Navigator):
+    obstacle_mask = get_obstacle_mask(nav.frame_map, nav.robot_position if nav.robot_found else None,
+                                      nav.target_position if nav.target_found else None)
+    # Note: the minimum distance to any obstacle is 'DILATION_SIZE_PX - approx_poly_epsilon'
     approx_poly_epsilon = 2
-    obstacle_mask = get_obstacle_mask(img, robot_position, target_position)
-    regions = extract_contours(obstacle_mask, approx_poly_epsilon)
-    graph = build_graph(regions)
-    return regions, graph
+    nav.regions = extract_contours(obstacle_mask, approx_poly_epsilon)
+    nav.graph = build_graph(nav.regions)
 
 
-def callback_build_graph(sender, app_data, user_data):
+def callback_button_build_map(sender, app_data, user_data):
     assert isinstance(user_data, Navigator)
-    nav = user_data
-    nav.regions, nav.graph = build_static_graph(nav.frame_map,
-                                                nav.robot_position if nav.robot_found else None,
-                                                nav.target_position if nav.target_found else None)
+    build_static_graph(user_data)
 
 
+# FIXME: temporary
 def callback_update_graph(sender, app_data, user_data):
     assert isinstance(user_data, Navigator)
     nav = user_data
@@ -199,26 +196,47 @@ def resize_plot_to_fit_window(window: Union[int, str], plot: Union[int, str], im
     # print(dpg.get_axis_limits('tag_map_axis_y'))
 
 
-# FIXME: temporary
-data_x = []
-data_y = []
-current_plot_x = 0
+def update_plots(nav: Navigator):
+    if len(nav.sample_time_history) < 2:
+        return
 
+    num_samples_to_plot = dpg.get_value('tag_samples_slider')
+    num_samples_to_plot = min(num_samples_to_plot, len(nav.sample_time_history))
+    time_data = np.array(nav.sample_time_history)[-num_samples_to_plot:].tolist()
+    estimated_pose_arr = np.array(nav.estimated_pose_history)[-num_samples_to_plot:]
+    measured_pose_arr = np.array(nav.estimated_pose_history)[-num_samples_to_plot:]
+    estimated_theta_degrees = np.rad2deg(estimated_pose_arr[:, 2])[-num_samples_to_plot:]
+    measured_theta_degrees = np.rad2deg(measured_pose_arr[:, 2])[-num_samples_to_plot:]
 
-# FIXME: temporary
-def update_series():
-    global current_plot_x
-    data_x.append(current_plot_x)
-    current_plot_x += 0.01
-    data_y.append(np.random.random())
-    dpg.set_value('tag_series', [data_x, data_y])
-    dpg.set_axis_limits_auto('tag_plot_axis_x')
-    dpg.set_axis_limits_auto('tag_plot_axis_y')
+    dpg.set_value('tag_series_x_est', [time_data, estimated_pose_arr[:, 0].tolist()])
+    dpg.set_value('tag_series_y_est', [time_data, estimated_pose_arr[:, 1].tolist()])
+    dpg.set_value('tag_series_x_meas', [time_data, measured_pose_arr[:, 0].tolist()])
+    dpg.set_value('tag_series_y_meas', [time_data, measured_pose_arr[:, 1].tolist()])
+    dpg.set_value('tag_series_theta_est', [time_data, estimated_theta_degrees.tolist()])
+    dpg.set_value('tag_series_theta_meas', [time_data, measured_theta_degrees.tolist()])
+
+    # Set limits on the time axis (will automatically change the time axis of the other plot, since they are linked)
+    dpg.set_axis_limits('tag_plot_xy_axis_x', time_data[0], time_data[-1])
+
+    # Set limits on the y axes
+    min_pos = min(np.min(estimated_pose_arr[:, :2]), np.min(measured_pose_arr[:, :2]))
+    max_pos = max(np.max(estimated_pose_arr[:, :2]), np.max(measured_pose_arr[:, :2]))
+    min_theta = min(np.min(estimated_theta_degrees), np.min(measured_theta_degrees))
+    max_theta = max(np.max(estimated_theta_degrees), np.max(measured_theta_degrees))
+    print(f'{min_pos}, {max_pos}, {min_theta}, {max_theta}')
+    pos_range = max_pos - min_pos
+    theta_range = max_theta - min_theta
+    ymin_xy = min_pos - pos_range * 0.1 if pos_range > 0 else min_pos - 1
+    ymax_xy = max_pos + pos_range * 0.1 if pos_range > 0 else max_pos + 1
+    ymin_theta = min_theta - theta_range * 0.1 if theta_range > 0 else min_theta - 1
+    ymax_theta = max_theta + theta_range * 0.1 if theta_range > 0 else max_theta + 1
+    dpg.set_axis_limits('tag_plot_xy_axis_y', ymin_xy, ymax_xy)
+    dpg.set_axis_limits('tag_plot_theta_axis_y', ymin_theta, ymax_theta)
 
 
 def build_interface(nav: Navigator):
     dpg.configure_app(docking=True, docking_space=True, init_file='imgui.ini', auto_save_init_file=True)
-    dpg.create_viewport(title='Robot interface', width=640, height=480)
+    dpg.create_viewport(title='Robot interface', width=1280, height=720)
 
     with dpg.texture_registry():
         default_frame_data = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 4), dtype=np.float32)
@@ -236,7 +254,7 @@ def build_interface(nav: Navigator):
         dpg.add_image(texture_tag='tag_frame_texture', tag='tag_frame_image')
 
     with dpg.window(label='Map', tag='tag_map_window', no_close=True):
-        dpg.add_button(label='Build map', callback=callback_build_graph, user_data=nav)
+        dpg.add_button(label='Build map', callback=callback_button_build_map, user_data=nav)
         dpg.add_button(label='Update graph', callback=callback_update_graph, user_data=nav)
         with dpg.plot(label='Map', tag='tag_map_plot', equal_aspects=True):
             dpg.add_plot_axis(dpg.mvXAxis, label='X [mm]', tag='tag_map_axis_x')
@@ -244,12 +262,25 @@ def build_interface(nav: Navigator):
                 dpg.add_image_series(texture_tag='tag_map_texture', tag='tag_map_image_series', bounds_min=(0, 0),
                                      bounds_max=(MAP_WIDTH_PX, MAP_HEIGHT_PX))
 
-    with dpg.window(label='State plot', tag='tag_plot_window', no_close=True):
-        with dpg.plot(label='State plot', tag='tag_plot', width=-1, height=-1):
-            dpg.add_plot_legend()
-            dpg.add_plot_axis(dpg.mvXAxis, label='x', tag='tag_plot_axis_x')
-            with dpg.plot_axis(dpg.mvYAxis, label='y', tag='tag_plot_axis_y'):
-                dpg.add_line_series(data_x, data_y, label='random data', tag='tag_series')
+    with dpg.window(label='Plots', tag='tag_plot_window', no_close=True):
+        dpg.add_slider_int(label='Samples to plot', tag='tag_samples_slider', default_value=300, min_value=10,
+                           max_value=1200)
+        with dpg.subplots(2, 1, label='', width=-1, height=-1, link_all_x=True):
+            with dpg.plot(label='XY plot', tag='tag_plot_xy', width=-1, height=-1):
+                dpg.add_plot_legend()
+                dpg.add_plot_axis(dpg.mvXAxis, label='Time [s]', tag='tag_plot_xy_axis_x')
+                with dpg.plot_axis(dpg.mvYAxis, label='Position [mm]', tag='tag_plot_xy_axis_y'):
+                    dpg.add_line_series([], [], label='X (estimated)', tag='tag_series_x_est')
+                    dpg.add_line_series([], [], label='Y (estimated)', tag='tag_series_y_est')
+                    dpg.add_line_series([], [], label='X (measured)', tag='tag_series_x_meas')
+                    dpg.add_line_series([], [], label='Y (measured)', tag='tag_series_y_meas')
+
+            with dpg.plot(label='Theta plot', tag='tag_plot_theta', width=-1, height=-1):
+                dpg.add_plot_legend()
+                dpg.add_plot_axis(dpg.mvXAxis, label='Time [s]', tag='tag_plot_theta_axis_x')
+                with dpg.plot_axis(dpg.mvYAxis, label='Orientation [°]', tag='tag_plot_theta_axis_y'):
+                    dpg.add_line_series([], [], label='Theta (estimated)', tag='tag_series_theta_est')
+                    dpg.add_line_series([], [], label='Theta (measured)', tag='tag_series_theta_meas')
 
     dpg.setup_dearpygui()
     dpg.show_viewport()
@@ -298,6 +329,12 @@ def run_navigation(nav: Navigator):
         nav.prev_P_est = new_P_est
 
         estimated_state = new_x_est.flatten()
+
+        nav.sample_time_history.append(time.time() - nav.start_time)
+        nav.measured_pose_history.append(measurements.flatten())
+        nav.estimated_pose_history.append(estimated_state)
+        update_plots(nav)
+
         outline = get_robot_outline(estimated_state[0], estimated_state[1], estimated_state[2]).astype(np.int32)
         outline = np.array([transform_affine(nav.world_to_image, pt) for pt in outline], dtype=np.int32)
         cv2.polylines(nav.img_map, [outline], isClosed=True, color=(192, 64, 64), thickness=2,
@@ -311,10 +348,10 @@ def run_navigation(nav: Navigator):
             if goal_reached and nav.path_index < len(nav.path_world) - 1:
                 nav.path_index += 1
 
-            nav.prev_input[:] = input_left, input_right
             nav.prev_x_est = np.array(nav.prev_x_est)
-            u_l = np.clip(int(nav.prev_input[0] / MMS_PER_MOTOR_SPEED), -500, 500)
-            u_r = np.clip(int(nav.prev_input[1] / MMS_PER_MOTOR_SPEED), -500, 500)
+
+            u_l = np.clip(int(input_left / MMS_PER_MOTOR_SPEED), -500, 500)
+            u_r = np.clip(int(input_right / MMS_PER_MOTOR_SPEED), -500, 500)
             nav.node.send_send_events({"requestspeed": [u_l, u_r]})
 
         print(f'X estimate = {new_x_est.flatten()}')
@@ -356,6 +393,14 @@ def main():
     FRAME_ASPECT_RATIO = FRAME_WIDTH / FRAME_HEIGHT
     MAP_ASPECT_RATIO = MAP_WIDTH_PX / MAP_HEIGHT_PX
 
+    # camera_matrix, distortion_coeffs = calibrate_camera(frame_width, frame_height)
+    # store_to_json('./camera.json', camera_matrix, distortion_coeffs)
+    # return
+    camera_matrix, distortion_coeffs = load_camera_from_json('./camera.json')
+    new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs,
+                                                           (MAP_WIDTH_PX, MAP_HEIGHT_PX), 0,
+                                                           (MAP_WIDTH_PX, MAP_HEIGHT_PX))
+
     video_thread = VideoThread(FRAME_WIDTH, FRAME_HEIGHT)
 
     nav = Navigator()
@@ -364,14 +409,6 @@ def main():
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
     detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
     nav.detector = detector
-
-    # camera_matrix, distortion_coeffs = calibrate_camera(frame_width, frame_height)
-    # store_to_json('./camera.json', camera_matrix, distortion_coeffs)
-    # return
-    camera_matrix, distortion_coeffs = load_camera_from_json('./camera.json')
-    new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs,
-                                                           (MAP_WIDTH_PX, MAP_HEIGHT_PX), 0,
-                                                           (MAP_WIDTH_PX, MAP_HEIGHT_PX))
 
     client = ClientAsync()
     nav.node = aw(client.wait_for_node())
@@ -392,6 +429,8 @@ def main():
 
     dpg.create_context()
     build_interface(nav)
+
+    nav.start_time = time.time()
 
     while dpg.is_dearpygui_running():
         # Let the client the occasion to handle its work
@@ -423,8 +462,6 @@ def main():
 
         resize_image_to_fit_window('tag_camera_window', 'tag_frame_image', FRAME_ASPECT_RATIO)
         resize_plot_to_fit_window('tag_map_window', 'tag_map_plot', MAP_ASPECT_RATIO)
-        # FIXME: this is just for testing
-        update_series()
 
         dpg.render_dearpygui_frame()
 

@@ -96,9 +96,9 @@ def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
             marker_indices.append(index.item(0, 0))
 
     all_found = len(marker_indices) == 4
-    corners = np.array(marker_corners)[marker_indices, :, 0, 0]
+    corners = np.array(marker_corners)[marker_indices]
 
-    return all_found, corners
+    return all_found, corners[:, 0, 0]
 
 
 def detect_robot(marker_corners, marker_ids) -> tuple[bool, np.ndarray, np.ndarray]:
