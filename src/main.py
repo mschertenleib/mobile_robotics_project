@@ -22,8 +22,9 @@ class Navigator:
     def __init__(self):
         self.start_time = time.time()
         self.node = None
-        self.first_estimate = True
-        # BGR u8 image destined to image processing
+        self.requires_first_measurement = True
+        self.map_found = False
+        # BGR u8 undistorted and perspective corrected image destined to image processing
         self.frame_map = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 3), dtype=np.uint8)
         # BGR u8 image destined to be displayed
         self.img_map = np.zeros_like(self.frame_map)
@@ -52,6 +53,7 @@ class Navigator:
         self.prev_P_est = np.array([[4.12148917e-02, -1.07933653e-04, 4.21480900e-04],
                                     [-1.07933653e-04, 4.04040766e-02, -5.94141187e-05],
                                     [4.21480900e-04, -5.94141187e-05, 3.06223793e-02]])
+        # Data for the plots
         self.sample_time_history = []
         self.estimated_pose_history = []
         self.measured_pose_history = []
@@ -93,9 +95,9 @@ async def compile_run_python_for_thymio(node):
         thymio_program_aseba = ATranspiler.simple_transpile(thymio_program_python)
         compilation_result = await node.compile(thymio_program_aseba)
         if compilation_result is None:
-            print('Compilation success')
+            print('Aseba compilation success')
         else:
-            print('Compilation error :', compilation_result)
+            print('Aseba compilation error :', compilation_result)
             return False
         await node.run()
 
@@ -204,7 +206,7 @@ def update_plots(nav: Navigator):
     num_samples_to_plot = min(num_samples_to_plot, len(nav.sample_time_history))
     time_data = np.array(nav.sample_time_history)[-num_samples_to_plot:].tolist()
     estimated_pose_arr = np.array(nav.estimated_pose_history)[-num_samples_to_plot:]
-    measured_pose_arr = np.array(nav.estimated_pose_history)[-num_samples_to_plot:]
+    measured_pose_arr = np.array(nav.measured_pose_history)[-num_samples_to_plot:]
     estimated_theta_degrees = np.rad2deg(estimated_pose_arr[:, 2])[-num_samples_to_plot:]
     measured_theta_degrees = np.rad2deg(measured_pose_arr[:, 2])[-num_samples_to_plot:]
 
@@ -223,7 +225,6 @@ def update_plots(nav: Navigator):
     max_pos = max(np.max(estimated_pose_arr[:, :2]), np.max(measured_pose_arr[:, :2]))
     min_theta = min(np.min(estimated_theta_degrees), np.min(measured_theta_degrees))
     max_theta = max(np.max(estimated_theta_degrees), np.max(measured_theta_degrees))
-    print(f'{min_pos}, {max_pos}, {min_theta}, {max_theta}')
     pos_range = max_pos - min_pos
     theta_range = max_theta - min_theta
     ymin_xy = min_pos - pos_range * 0.1 if pos_range > 0 else min_pos - 1
@@ -287,60 +288,70 @@ def build_interface(nav: Navigator):
 
 
 def run_navigation(nav: Navigator):
+    # Reset the render target with the frame value (the undistorted and perspective corrected one). Note that the frame
+    # might not have been updated since the last time, if the map was not detected or if the camera frame rate is slower
+    # than the frequency of the calls to run_navigation().
     nav.img_map[:] = nav.frame_map
 
-    corners, ids, rejected = nav.detector.detectMarkers(nav.frame_map)
+    measurements = None
 
-    nav.robot_found, nav.robot_position, nav.robot_direction = detect_robot(corners, ids)
-    nav.target_found, nav.target_position = detect_target(corners, ids)
+    # There is no point in detecting the robot position if the map was not found, because we would just get its position
+    # as it was when the map was detected for the last time, and throw off the state estimator because it is not up to
+    # date.
+    if nav.map_found:
+        corners, ids, rejected = nav.detector.detectMarkers(nav.frame_map)
 
-    if nav.robot_found:
-        pos = nav.robot_position.astype(np.int32)
-        tip = (nav.robot_position + nav.robot_direction).astype(np.int32)
-        cv2.arrowedLine(nav.img_map, pos, tip, color=(0, 0, 255), thickness=2, line_type=cv2.LINE_AA,
-                        tipLength=0.5)
-        cv2.drawMarker(nav.img_map, position=pos, color=(0, 0, 255), thickness=2, markerSize=10,
-                       markerType=cv2.MARKER_CROSS, line_type=cv2.LINE_AA)
+        nav.robot_found, nav.robot_position, nav.robot_direction = detect_robot(corners, ids)
+        nav.target_found, nav.target_position = detect_target(corners, ids)
 
-        robot_position_world = transform_affine(nav.image_to_world, nav.robot_position)
-        robot_x = robot_position_world.item(0)
-        robot_y = robot_position_world.item(1)
-        robot_theta = np.arctan2(-nav.robot_direction[0], -nav.robot_direction[1])
+        if nav.robot_found:
+            robot_position_world = transform_affine(nav.image_to_world, nav.robot_position)
+            robot_x = robot_position_world.item(0)
+            robot_y = robot_position_world.item(1)
+            robot_theta = np.arctan2(-nav.robot_direction[0], -nav.robot_direction[1])
 
-        outline = get_robot_outline(robot_x, robot_y, robot_theta).astype(np.int32)
-        outline = np.array([transform_affine(nav.world_to_image, pt) for pt in outline], dtype=np.int32)
-        cv2.polylines(nav.img_map, [outline], isClosed=True, color=(0, 0, 255), thickness=2,
-                      lineType=cv2.LINE_AA)
+            cv2.drawMarker(nav.img_map, position=nav.robot_position.astype(np.int32), color=(0, 0, 255), thickness=2,
+                           markerSize=10,
+                           markerType=cv2.MARKER_CROSS, line_type=cv2.LINE_AA)
+            outline = get_robot_outline(robot_x, robot_y, robot_theta)
+            outline = np.array([transform_affine(nav.world_to_image, pt) for pt in outline], dtype=np.int32)
+            cv2.polylines(nav.img_map, [outline], isClosed=True, color=(0, 0, 255), thickness=2,
+                          lineType=cv2.LINE_AA)
 
-        measurements = np.array([[robot_x], [robot_y], [robot_theta]])
-        if nav.first_estimate:
-            nav.prev_x_est[:] = measurements
-            if nav.path_world is not None and len(nav.path_world) != 0:
-                nav.dist_error = np.sqrt(
-                    (nav.path_world[0, 0] - measurements[0, 0]) ** 2 + (nav.path_world[0, 1] - measurements[1, 0]) ** 2)
-                nav.angle_error = np.rad2deg(nav.path_world[0, 2] - measurements[2, 0])
-            nav.first_estimate = False
+            measurements = np.array([[robot_x], [robot_y], [robot_theta]])
+            if nav.requires_first_measurement:
+                nav.prev_x_est[:] = measurements
+                nav.requires_first_measurement = False
 
-        speed_left = int(nav.node["motor.left.speed"])
-        speed_right = int(nav.node["motor.right.speed"])
+    # We need at least one measurement from the camera to start estimating our state, else we would not know where to
+    # start (the initial position of the robot can be completely random).
+    if not nav.requires_first_measurement:
+        speed_left = int(nav.node['motor.left.speed'])
+        speed_right = int(nav.node['motor.right.speed'])
         prev_input = np.array([speed_left * MMS_PER_MOTOR_SPEED, speed_right * MMS_PER_MOTOR_SPEED])
         new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est, prev_input)
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
-
         estimated_state = new_x_est.flatten()
 
+        print(
+            f'Estimation = {estimated_state}, Measurements = {measurements.flatten() if measurements is not None else None}')
+
         nav.sample_time_history.append(time.time() - nav.start_time)
-        nav.measured_pose_history.append(measurements.flatten())
+        nav.measured_pose_history.append(measurements.flatten() if measurements is not None else np.zeros(3))
         nav.estimated_pose_history.append(estimated_state)
         update_plots(nav)
 
-        outline = get_robot_outline(estimated_state[0], estimated_state[1], estimated_state[2]).astype(np.int32)
+        cv2.drawMarker(nav.img_map, position=transform_affine(nav.world_to_image, np.array(
+            [estimated_state[0], estimated_state[1]])).astype(np.int32),
+                       color=(64, 192, 64), thickness=2, markerSize=10,
+                       markerType=cv2.MARKER_CROSS, line_type=cv2.LINE_AA)
+        outline = get_robot_outline(estimated_state.item(0), estimated_state.item(1), estimated_state.item(2))
         outline = np.array([transform_affine(nav.world_to_image, pt) for pt in outline], dtype=np.int32)
-        cv2.polylines(nav.img_map, [outline], isClosed=True, color=(192, 64, 64), thickness=2,
+        cv2.polylines(nav.img_map, [outline], isClosed=True, color=(64, 192, 64), thickness=2,
                       lineType=cv2.LINE_AA)
 
-        if nav.path_world is not None and len(nav.path_world) != 0:
+        if nav.path_world is not None and len(nav.path_world) > 0:
             nav.prev_x_est = nav.prev_x_est.tolist()
             goal_state = [nav.path_world[nav.path_index, 0], nav.path_world[nav.path_index, 1]]
 
@@ -354,19 +365,18 @@ def run_navigation(nav: Navigator):
             u_r = np.clip(int(input_right / MMS_PER_MOTOR_SPEED), -500, 500)
             nav.node.send_send_events({"requestspeed": [u_l, u_r]})
 
-        print(f'X estimate = {new_x_est.flatten()}')
+        if nav.target_found:
+            cv2.drawMarker(nav.img_map, position=nav.target_position.astype(np.int32), color=(0, 255, 0),
+                           markerSize=10, markerType=cv2.MARKER_CROSS, thickness=2, line_type=cv2.LINE_AA)
+            cv2.circle(nav.img_map, center=nav.target_position.astype(np.int32), radius=50, color=(0, 255, 0),
+                       thickness=2,
+                       lineType=cv2.LINE_AA)
 
-    if nav.target_found:
-        cv2.drawMarker(nav.img_map, position=nav.target_position.astype(np.int32), color=(0, 255, 0),
-                       markerSize=10, markerType=cv2.MARKER_CROSS, thickness=2, line_type=cv2.LINE_AA)
-        cv2.circle(nav.img_map, center=nav.target_position.astype(np.int32), radius=50, color=(0, 255, 0), thickness=2,
-                   lineType=cv2.LINE_AA)
-
-    if nav.graph is not None:
-        draw_static_graph(nav.img_map, nav.graph, nav.regions)
-        if len(nav.path_image) >= 2 and nav.free_robot_position is not None and nav.free_target_position is not None:
-            draw_path(nav.img_map, nav.graph, nav.path_image, nav.stored_robot_position, nav.free_robot_position,
-                      nav.stored_target_position, nav.free_target_position)
+        if nav.graph is not None:
+            draw_static_graph(nav.img_map, nav.graph, nav.regions)
+            if len(nav.path_image) >= 2 and nav.free_robot_position is not None and nav.free_target_position is not None:
+                draw_path(nav.img_map, nav.graph, nav.path_image, nav.stored_robot_position, nav.free_robot_position,
+                          nav.stored_target_position, nav.free_target_position)
 
     nav.map_rgba_f32[:, :, 2::-1] = nav.img_map / 255.0
     dpg.set_value('tag_map_texture', nav.map_rgba_f32.flatten())
@@ -427,13 +437,15 @@ def main():
     local_nav_timer = RepeatTimer(0.1, run_local_navigation, args=[loc_nav])
     # local_nav_timer.start()
 
+    # Create interface
     dpg.create_context()
     build_interface(nav)
 
+    # nav.start_time is just the reference for t=0.0 on the plots
     nav.start_time = time.time()
 
     while dpg.is_dearpygui_running():
-        # Let the client the occasion to handle its work
+        # Give the client the occasion to handle its work
         aw(client.sleep(0.005))
 
         # Get the latest frame
@@ -446,8 +458,9 @@ def main():
             # Detect map corners
             corners, ids, rejected = detector.detectMarkers(frame)
             map_found, map_corners = detect_map(corners, ids)
+            nav.map_found = map_found
             if map_found:
-                # Correct perspective
+                # Correct perspective, and update the Navigator's frame
                 matrix = get_perspective_transform(map_corners, MAP_WIDTH_PX, MAP_HEIGHT_PX)
                 cv2.warpPerspective(frame, matrix, dsize=(MAP_WIDTH_PX, MAP_HEIGHT_PX), dst=nav.frame_map)
 

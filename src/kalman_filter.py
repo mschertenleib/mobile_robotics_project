@@ -1,14 +1,14 @@
+from typing import Optional
+
 from parameters import *
 
 
-def kalman_filter(measurements, mu_km, sig_km, u_k):
-    # global parameters
+def kalman_filter(measurements: Optional[np.ndarray], mu_km: np.ndarray, sig_km: np.ndarray,
+                  u_k: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    # Global parameters
     d = 100
     H = np.eye(3)
-    r1 = 1.7
-    r2 = 1.7
-    r3 = 0.1
-    Q = np.array([[r1, 0, 0], [0, r2, 0], [0, 0, r3]])
+    Q = np.array([[1.7, 0, 0], [0, 1.7, 0], [0, 0, 0.1]])
     R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
 
     # Prediction through the a priori estimate
@@ -27,35 +27,25 @@ def kalman_filter(measurements, mu_km, sig_km, u_k):
 
     # Estimated covariance of the state
     sig_k_pred = np.dot(G_k, np.dot(sig_km, G_k.T))
-    sig_k_pred = sig_k_pred + Q if Q is not None else sig_k_pred
+    sig_k_pred += Q
 
-    if True:  # camera:
+    if measurements is not None:
         y = measurements
-
     else:
-        # if no measurements we consider our measurements to be the same as our a priori estimate as to cancel out the
+        # If no measurements we consider our measurements to be the same as our a priori estimate as to cancel out the
         # effect of innovation
         y = mu_k_pred
-        # print('y:',y)
-        # print('--------')
 
-    # innovation / measurement residual
+    # Innovation / measurement residual
     i = y - np.dot(H, mu_k_pred)
-    # print('np.dot(H, mu_k_pred): ',np.dot(H, mu_k_pred))
-    # print('innovation:', i)
-    # print('--------')
     # measurement prediction covariance
     S = np.dot(H, np.dot(sig_k_pred, H.T)) + R
 
     # Kalman gain (tells how much the predictions should be corrected based on the measurements)
     K = np.dot(sig_k_pred, np.dot(H.T, np.linalg.inv(S)))
 
-    # a posteriori estimate
-    # print('mu_k_pred:', mu_k_pred)
-    # print('--------')
+    # A posteriori estimate
     x_est = mu_k_pred + np.dot(K, i)
-    # print('mu_k_pred + np.dot(K,i): ',mu_k_pred + np.dot(K,i))
-    # print('--------')
     sig_est = sig_k_pred - np.dot(K, np.dot(H, sig_k_pred))
 
     return x_est, sig_est
