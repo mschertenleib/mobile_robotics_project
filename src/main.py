@@ -24,6 +24,7 @@ class Navigator:
         self.node = None
         self.requires_first_measurement = True
         self.map_found = False
+        self.was_robot_detected_last_frame = False
         # BGR u8 undistorted and perspective corrected image destined to image processing
         self.frame_map = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 3), dtype=np.uint8)
         # BGR u8 image destined to be displayed
@@ -49,10 +50,7 @@ class Navigator:
         self.stored_target_position = np.zeros(2)
         self.free_target_position = np.zeros(2)
         self.prev_x_est = np.zeros((3, 1))
-        # P_est at convergence during straight line test
-        self.prev_P_est = np.array([[4.12148917e-02, -1.07933653e-04, 4.21480900e-04],
-                                    [-1.07933653e-04, 4.04040766e-02, -5.94141187e-05],
-                                    [4.21480900e-04, -5.94141187e-05, 3.06223793e-02]])
+        self.prev_P_est = KALMAN_Q
         # Data for the plots
         self.sample_time_history = []
         self.estimated_pose_history = []
@@ -330,12 +328,12 @@ def run_navigation(nav: Navigator):
         speed_right = int(nav.node['motor.right.speed'])
         prev_input = np.array([speed_left * MMS_PER_MOTOR_SPEED, speed_right * MMS_PER_MOTOR_SPEED])
         new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est, prev_input)
+        if np.linalg.norm(new_x_est.flatten()[:2] - nav.prev_x_est.flatten()[:2]) > KIDNAPPING_DELTA:
+            print(f'{new_x_est.flatten().item(0)} AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
         estimated_state = new_x_est.flatten()
-
-        print(
-            f'Estimation = {estimated_state}, Measurements = {measurements.flatten() if measurements is not None else None}')
 
         nav.sample_time_history.append(time.time() - nav.start_time)
         nav.measured_pose_history.append(measurements.flatten() if measurements is not None else np.zeros(3))
@@ -378,6 +376,10 @@ def run_navigation(nav: Navigator):
                 draw_path(nav.img_map, nav.graph, nav.path_image, nav.stored_robot_position, nav.free_robot_position,
                           nav.stored_target_position, nav.free_target_position)
 
+    if nav.map_found and nav.robot_found:
+        nav.was_robot_detected_last_frame = True
+    else:
+        nav.was_robot_detected_last_frame = False
     nav.map_rgba_f32[:, :, 2::-1] = nav.img_map / 255.0
     dpg.set_value('tag_map_texture', nav.map_rgba_f32.flatten())
 
@@ -446,7 +448,7 @@ def main():
 
     while dpg.is_dearpygui_running():
         # Give the client the occasion to handle its work
-        aw(client.sleep(0.005))
+        aw(client.sleep(0.01))
 
         # Get the latest frame
         is_frame_new = video_thread.get_frame(frame)

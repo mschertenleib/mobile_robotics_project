@@ -24,6 +24,7 @@ ROBOT_MARKER_REAR_LEFT = np.array([-MARKER_SIZE_MM * 0.5, -MARKER_SIZE_MM * 0.5]
 ROBOT_RADIUS_MM = 80
 ROBOT_CENTER_TO_WHEEL = 48
 ROBOT_WHEEL_RADIUS = 22
+ROBOT_WHEEL_SPACING = 96
 ROBOT_OUTLINE = np.array([[-56, -30],
                           [56, -30],
                           [56, 55],
@@ -37,3 +38,10 @@ DILATION_RADIUS_PX = int((ROBOT_RADIUS_MM + 10) / MAP_WIDTH_MM * MAP_WIDTH_PX)
 ROBOT_RADIUS_PX = int((ROBOT_RADIUS_MM + 20) / MAP_WIDTH_MM * MAP_WIDTH_PX)
 TARGET_RADIUS_PX = int((TARGET_RADIUS_MM + 10) / MAP_WIDTH_MM * MAP_WIDTH_PX)
 MARKER_SIZE_PX = int((MARKER_SIZE_MM + 5) / MAP_WIDTH_MM * MAP_WIDTH_PX)
+
+# Filter
+KALMAN_Q = 2 * np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
+KALMAN_R = 10 * np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
+
+# Kidnapping
+KIDNAPPING_DELTA = 50

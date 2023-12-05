@@ -13,9 +13,11 @@ class VideoThread:
     """
 
     def __init__(self, frame_width: int, frame_height: int):
-        self._cap = cv2.VideoCapture(0)
+        self._cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
+        if not self._cap.isOpened():
+            raise Exception('Failed to open capture')
         self._frame = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
         self._is_frame_new = True
         self._should_stop = False
