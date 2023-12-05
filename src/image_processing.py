@@ -41,7 +41,7 @@ def get_obstacle_mask(img: np.ndarray, robot_position: Optional[np.ndarray],
     if their position is not None.
     """
 
-    threshold = 200
+    threshold = 150
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
 
@@ -81,20 +81,24 @@ def detect_map(marker_corners, marker_ids) -> tuple[bool, np.ndarray]:
     The corners are ordered clockwise, starting from the top left.
     """
 
-    # TODO: actually return the partial set of corners even if not all of them are detected, so we can display the ones
-    #  which were detected.
+    # NOTE: marker_corners and marker_ids are assumed to be directly obtained from
+    # cv2.aruco.ArucoDetector.detectMarkers().
+    # marker_corners is a tuple of arrays of shape (1, 4, 2)
+    # marker_ids is a tuple of arrays of shape (1)
 
-    if marker_ids is not None and len(marker_ids) >= 4:
-        marker_indices = []
-        for i in range(4):
-            index = np.argwhere(np.array(marker_ids) == i)
-            if len(index) == 1:
-                marker_indices.append(index.flatten().item(0))
-        if len(marker_indices) == 4:
-            corners = np.array(marker_corners)[marker_indices].squeeze()[:, 0]
-            return True, corners
+    if marker_ids is None:
+        return False, np.array([])
 
-    return False, np.zeros(2)
+    marker_indices = []
+    for i in range(4):
+        index = np.argwhere(np.array(marker_ids).flatten() == i)
+        if len(index) == 1:
+            marker_indices.append(index.item(0, 0))
+
+    all_found = len(marker_indices) == 4
+    corners = np.array(marker_corners)[marker_indices, :, 0, 0]
+
+    return all_found, corners
 
 
 def detect_robot(marker_corners, marker_ids) -> tuple[bool, np.ndarray, np.ndarray]:

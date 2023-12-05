@@ -353,6 +353,40 @@ def reconstruct_path(prev: np.ndarray, source: int, target: int) -> list[int]:
     return path
 
 
+def distance_to_polyline(point: np.ndarray, vertices: np.ndarray) -> float:
+    """
+    Returns the closest distance between the point and the polyline formed by vertices
+    """
+
+    min_distance = np.inf
+
+    for i in range(vertices.shape[0] - 1):
+        edge = vertices[i + 1] - vertices[i]
+        to_vertex_1 = vertices[i] - point
+        to_vertex_2 = vertices[i + 1] - point
+        normal = np.float32([edge[1], -edge[0]])
+        n_cross_v1 = np.cross(normal, to_vertex_1)
+        n_cross_v2 = np.cross(normal, to_vertex_2)
+
+        # If this is true, the projection of the point on the segment lies somewhere between the two vertices
+        if (n_cross_v1 < 0 < n_cross_v2) or (n_cross_v1 > 0 > n_cross_v2):
+            normal /= np.linalg.norm(normal)
+            distance = np.abs(np.dot(to_vertex_1, normal))
+            if distance < min_distance:
+                min_distance = distance
+
+        # Else the projection of the point on the segment lies on a vertex or beyond one of the vertices
+        else:
+            distance = np.linalg.norm(to_vertex_1)
+            if distance < min_distance:
+                min_distance = distance
+            distance = np.linalg.norm(to_vertex_2)
+            if distance < min_distance:
+                min_distance = distance
+
+    return min_distance
+
+
 def distance_to_contours(point: np.ndarray, region_contours: list[np.ndarray]) -> tuple[float, int]:
     """
     Returns the signed distance from the point to the region contours, as well as the index of the closest contour.

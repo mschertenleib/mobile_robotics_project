@@ -22,9 +22,11 @@ class Navigator:
     def __init__(self):
         self.node = None
         self.first_estimate = True
-        self.last_sample_time = time.time()
+        # BGR u8 image destined to image processing
         self.frame_map = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 3), dtype=np.uint8)
+        # BGR u8 image destined to be displayed
         self.img_map = np.zeros_like(self.frame_map)
+        # RGBA f32 image for displaying with dearpygui
         self.map_rgba_f32 = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 4), dtype=np.float32)
         self.map_rgba_f32[:, :, 3] = 1.0
         self.detector = None
@@ -345,19 +347,18 @@ def run_local_navigation(loc_nav: LocalNavigator):
 
 
 def main():
-    nav = Navigator()
-
-    video_thread = VideoThread(FRAME_WIDTH, FRAME_HEIGHT)
-
+    # BGR u8 frame retrieved from the camera
     frame = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
-    frame_undistorted = np.zeros_like(frame)
-    img_undistorted = np.zeros_like(frame)
     # RGBA f32 image for displaying with dearpygui
     frame_rgba_f32 = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 4), dtype=np.float32)
     frame_rgba_f32[:, :, 3] = 1.0
 
     FRAME_ASPECT_RATIO = FRAME_WIDTH / FRAME_HEIGHT
     MAP_ASPECT_RATIO = MAP_WIDTH_PX / MAP_HEIGHT_PX
+
+    video_thread = VideoThread(FRAME_WIDTH, FRAME_HEIGHT)
+
+    nav = Navigator()
 
     detector_params = cv2.aruco.DetectorParameters()
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
@@ -392,38 +393,33 @@ def main():
     dpg.create_context()
     build_interface(nav)
 
-    print(dpg.get_global_font_scale())
-
     while dpg.is_dearpygui_running():
-        # Let the client handle its work
+        # Let the client the occasion to handle its work
         aw(client.sleep(0.005))
 
         # Get the latest frame
         is_frame_new = video_thread.get_frame(frame)
 
-        cv2.undistort(frame, camera_matrix, distortion_coeffs, dst=frame_undistorted,
-                      newCameraMatrix=new_camera_matrix)
-        img_undistorted[:] = frame_undistorted
+        if is_frame_new:
+            # Correct camera distortions
+            frame = cv2.undistort(frame, camera_matrix, distortion_coeffs, newCameraMatrix=new_camera_matrix)
 
-        corners, ids, rejected = detector.detectMarkers(frame_undistorted)
+            # Detect map corners
+            corners, ids, rejected = detector.detectMarkers(frame)
+            map_found, map_corners = detect_map(corners, ids)
+            if map_found:
+                # Correct perspective
+                matrix = get_perspective_transform(map_corners, MAP_WIDTH_PX, MAP_HEIGHT_PX)
+                cv2.warpPerspective(frame, matrix, dsize=(MAP_WIDTH_PX, MAP_HEIGHT_PX), dst=nav.frame_map)
 
-        map_found, map_corners = detect_map(corners, ids)
-        if not map_found:
-            cv2.putText(img_undistorted, 'Map not detected', org=(10, 30), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=1, color=(64, 64, 192), lineType=cv2.LINE_AA)
-        else:
-            cv2.putText(img_undistorted, 'Map detected', org=(10, 30), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=1, color=(64, 192, 64), lineType=cv2.LINE_AA)
-            for corner in map_corners:
-                cv2.drawMarker(img_undistorted, position=corner.astype(np.int32), color=(0, 0, 255),
+            # Draw a marker at each detected corner of the map
+            for i in range(map_corners.shape[0]):
+                cv2.drawMarker(frame, position=map_corners[i].astype(np.int32), color=(0, 0, 255),
                                markerType=cv2.MARKER_CROSS, thickness=2)
 
-            matrix = get_perspective_transform(map_corners, MAP_WIDTH_PX, MAP_HEIGHT_PX)
-            cv2.warpPerspective(frame_undistorted, matrix, dsize=(MAP_WIDTH_PX, MAP_HEIGHT_PX),
-                                dst=nav.frame_map)
-
-        frame_rgba_f32[:, :, 2::-1] = img_undistorted / 255.0
-        dpg.set_value('tag_frame_texture', frame_rgba_f32.flatten())
+            # Convert BGR u8 to RGBA f32 for dearpygui
+            frame_rgba_f32[:, :, 2::-1] = frame / 255.0
+            dpg.set_value('tag_frame_texture', frame_rgba_f32.flatten())
 
         resize_image_to_fit_window('tag_camera_window', 'tag_frame_image', FRAME_ASPECT_RATIO)
         resize_plot_to_fit_window('tag_map_window', 'tag_map_plot', MAP_ASPECT_RATIO)
