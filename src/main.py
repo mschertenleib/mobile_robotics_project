@@ -108,11 +108,12 @@ def build_static_graph(nav: Navigator):
     # Note: the minimum distance to any obstacle is 'DILATION_SIZE_PX - approx_poly_epsilon'
     approx_poly_epsilon = 2
     nav.regions = extract_contours(obstacle_mask, approx_poly_epsilon)
-    nav.graph = build_graph(nav.regions)
+    if len(nav.regions) > 0:
+        nav.graph = build_graph(nav.regions)
 
 
 def build_dynamic_graph_and_plan_path(nav: Navigator):
-    if nav.robot_found and nav.target_found:
+    if nav.graph is not None and nav.robot_found and nav.target_found:
         nav.stored_robot_position = nav.robot_position
         nav.stored_target_position = nav.target_position
         nav.free_robot_position, nav.free_target_position = update_graph(nav.graph, nav.regions,

@@ -2,9 +2,9 @@ from parameters import *
 
 
 def astolfi_control(state, goal_state):
-    Kp = 8  # >0
-    Ka = 75  # > kp
-    Kb = -1e-8  # <0
+    Kp = 8  # > 0
+    Ka = 75  # > Kp
+    goal_radius = 20
 
     delta_x = goal_state[0] - state[0]
     delta_y = goal_state[1] - state[1]
@@ -16,17 +16,19 @@ def astolfi_control(state, goal_state):
         alpha = 2 * np.pi + alpha
     elif alpha > np.pi:
         alpha = - 2 * np.pi + alpha
-    beta = -reference_angle
 
-    if rho < 20:
+    if rho <= goal_radius:
         return 0, 0, True
 
-    v = Kp * rho
-    omega = Ka * alpha + Kb * beta
+    gain = 140
+    power = 1/4
+    factor = gain / (goal_radius**power)
+    v = Kp * factor * rho**power
+    # v = Kp * rho
+    omega = Ka * alpha
 
     u_r = (ROBOT_CENTER_TO_WHEEL * omega + v) / ROBOT_WHEEL_RADIUS
     u_l = (v - ROBOT_CENTER_TO_WHEEL * omega) / ROBOT_WHEEL_RADIUS
-    # print(f'{delta_x = }, {delta_y = }, {alpha = }, {u_l = }, {u_r = }')
 
     speed_threshold = 80
     u_r = np.clip(u_r, -speed_threshold, speed_threshold)

@@ -41,8 +41,8 @@ TARGET_MASK_RADIUS_PX = int((TARGET_RADIUS_MM + 10) / MAP_WIDTH_MM * MAP_WIDTH_P
 MARKER_MASK_SIZE_PX = int((MARKER_SIZE_MM + 5) / MAP_WIDTH_MM * MAP_WIDTH_PX)
 
 # Filter
-KALMAN_Q = 2 * np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
-KALMAN_R = 10 * np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
+KALMAN_Q = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
+KALMAN_R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 0.04]])
 
 # Path re-planning condition
 ROBOT_DELTA_TO_PLAN_PATH_AGAIN_MM = 40
