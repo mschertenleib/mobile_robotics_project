@@ -24,6 +24,7 @@ class Navigator:
         self.node = None
         self.requires_first_measurement = True
         self.map_found = False
+        self.should_follow_path = False
         # BGR u8 undistorted and perspective corrected image destined to image processing
         self.frame_map = np.zeros((MAP_HEIGHT_PX, MAP_WIDTH_PX, 3), dtype=np.uint8)
         # BGR u8 image destined to be displayed
@@ -36,7 +37,7 @@ class Navigator:
         self.world_to_image = get_world_to_image_matrix(MAP_WIDTH_MM, MAP_HEIGHT_MM, MAP_WIDTH_PX, MAP_HEIGHT_PX)
         self.regions = None
         self.graph = None
-        self.path_image: list[int] = []
+        self.path_image_space: list[int] = []
         self.path_world = None
         self.path_index = 0
         self.robot_found = False
@@ -117,18 +118,25 @@ def build_dynamic_graph_and_plan_path(nav: Navigator):
         nav.free_robot_position, nav.free_target_position = update_graph(nav.graph, nav.regions,
                                                                          nav.stored_robot_position,
                                                                          nav.stored_target_position)
-        nav.path_image = dijkstra(nav.graph.adjacency, Graph.SOURCE, Graph.TARGET)
-        if len(nav.path_image) >= 2:
-            nav.path_world = np.empty((len(nav.path_image) - 1, 2))
-            nav.path_world[:, :2] = np.array(
-                [transform_affine(nav.image_to_world, nav.graph.vertices[nav.path_image[i]]) for i in
-                 range(1, len(nav.path_image))])
-            nav.path_index = 0
+        nav.path_image_space = dijkstra(nav.graph.adjacency, Graph.SOURCE, Graph.TARGET)
+        if len(nav.path_image_space) >= 2:
+            nav.path_world = np.array(
+                [transform_affine(nav.image_to_world, nav.graph.vertices[nav.path_image_space[i]]) for i in
+                 range(1, len(nav.path_image_space))])
+        else:
+            nav.path_world = np.array([])
+        nav.path_index = 0
 
 
 def callback_button_build_map(sender, app_data, user_data):
     assert isinstance(user_data, Navigator)
     build_static_graph(user_data)
+    build_dynamic_graph_and_plan_path(user_data)
+
+
+def callback_button_go(sender, app_data, user_data):
+    assert isinstance(user_data, Navigator)
+    user_data.should_follow_path = True
 
 
 def draw_static_graph(img: np.ndarray, graph: Graph, regions: list[list[np.ndarray]]):
@@ -171,25 +179,6 @@ def resize_image_to_fit_window(window: Union[int, str], image: Union[int, str], 
 
     dpg.set_item_width(image, image_width)
     dpg.set_item_height(image, image_height)
-
-
-def resize_plot_to_fit_window(window: Union[int, str], plot: Union[int, str], image_aspect_ratio: float):
-    window_width, window_height = dpg.get_item_rect_size(window)
-    if window_width <= 0 or window_height <= 0:
-        return
-
-    # Use the item position within the window to deduce the window's border width and title bar height
-    plot_pos_x, plot_pos_y = dpg.get_item_pos(plot)
-    window_content_width = window_width - 2 * plot_pos_x
-    window_content_height = window_height - plot_pos_y - plot_pos_x
-    plot_width, plot_height = dpg.get_item_rect_size(plot)
-
-    # TODO: it should be possible to correctly resize the plot, but need to make a drawing
-
-    # dpg.set_axis_limits('tag_map_axis_x', 0, MAP_WIDTH_PX)
-    # dpg.set_axis_limits('tag_map_axis_y', 0, MAP_HEIGHT_PX)
-    # print(dpg.get_axis_limits('tag_map_axis_x'))
-    # print(dpg.get_axis_limits('tag_map_axis_y'))
 
 
 def update_plots(nav: Navigator):
@@ -257,11 +246,8 @@ def build_interface(nav: Navigator):
 
     with dpg.window(label='Map', tag='tag_map_window', no_close=True):
         dpg.add_button(label='Build map', callback=callback_button_build_map, user_data=nav)
-        with dpg.plot(label='Map', tag='tag_map_plot', equal_aspects=True):
-            dpg.add_plot_axis(dpg.mvXAxis, label='X [mm]', tag='tag_map_axis_x')
-            with dpg.plot_axis(dpg.mvYAxis, label='Y [mm]', tag='tag_map_axis_y'):
-                dpg.add_image_series(texture_tag='tag_map_texture', tag='tag_map_image_series', bounds_min=(0, 0),
-                                     bounds_max=(MAP_WIDTH_PX, MAP_HEIGHT_PX))
+        dpg.add_button(label='GO!', callback=callback_button_go, user_data=nav)
+        dpg.add_image(texture_tag='tag_map_texture', tag='tag_map_image')
 
     with dpg.window(label='Plots', tag='tag_plot_window', no_close=True):
         dpg.add_slider_int(label='Samples to plot', tag='tag_samples_slider', default_value=300, min_value=10,
@@ -296,6 +282,8 @@ def run_navigation(nav: Navigator):
 
     measurements = None
 
+    should_replan_path = False
+
     # There is no point in detecting the robot position if the map was not found, because we would just get its position
     # as it was when the map was detected for the last time, and throw off the state estimator because it is not up to
     # date.
@@ -303,7 +291,12 @@ def run_navigation(nav: Navigator):
         corners, ids, rejected = nav.detector.detectMarkers(nav.frame_map)
 
         nav.robot_found, nav.robot_position, nav.robot_direction = detect_robot(corners, ids)
-        nav.target_found, nav.target_position = detect_target(corners, ids)
+
+        nav.target_found, target_position = detect_target(corners, ids)
+        if nav.target_found and nav.target_position is not None and np.linalg.norm(
+                target_position - nav.target_position) >= TARGET_DELTA_TO_PLAN_PATH_AGAIN_MM:
+            should_replan_path = True
+        nav.target_position = target_position
 
         if nav.robot_found:
             robot_position_world = transform_affine(nav.image_to_world, nav.robot_position)
@@ -324,15 +317,13 @@ def run_navigation(nav: Navigator):
                 nav.prev_x_est[:] = measurements
                 nav.requires_first_measurement = False
 
-    should_replan_path = False
-
     # We need at least one measurement from the camera to start estimating our state, else we would not know where to
     # start (the initial position of the robot can be completely random).
     if not nav.requires_first_measurement:
         speed_left = int(nav.node.v.motor.left.speed) * MMS_PER_MOTOR_SPEED
         speed_right = int(nav.node.v.motor.right.speed) * MMS_PER_MOTOR_SPEED
         new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est, speed_left, speed_right)
-        if np.linalg.norm(new_x_est.flatten()[:2] - nav.prev_x_est.flatten()[:2]) >= DELTA_TO_PLAN_PATH_AGAIN_MM:
+        if np.linalg.norm(new_x_est.flatten()[:2] - nav.prev_x_est.flatten()[:2]) >= ROBOT_DELTA_TO_PLAN_PATH_AGAIN_MM:
             should_replan_path = True
 
         nav.prev_x_est = new_x_est
@@ -345,7 +336,7 @@ def run_navigation(nav: Navigator):
             nav.measured_pose_history[-1][2] = np.rad2deg(nav.measured_pose_history[-1][2])
         else:
             nav.measured_pose_history.append(np.zeros(3))
-        nav.estimated_pose_history.append(estimated_state)
+        nav.estimated_pose_history.append(estimated_state.copy())
         nav.estimated_pose_history[-1][2] = np.rad2deg(nav.estimated_pose_history[-1][2])
         update_plots(nav)
 
@@ -361,31 +352,38 @@ def run_navigation(nav: Navigator):
         if should_replan_path:
             build_dynamic_graph_and_plan_path(nav)
 
-        if nav.path_world is not None and len(nav.path_world) > 0:
+        speed_left_target, speed_right_target = 0, 0
+
+        if nav.should_follow_path and nav.path_world is not None and len(nav.path_world) > 0:
             nav.prev_x_est = nav.prev_x_est.tolist()
             goal_state = [nav.path_world[nav.path_index, 0], nav.path_world[nav.path_index, 1]]
 
             input_left, input_right, goal_reached = astolfi_control(np.array(nav.prev_x_est).flatten(), goal_state)
-            if goal_reached and nav.path_index < len(nav.path_world) - 1:
-                nav.path_index += 1
+            if goal_reached:
+                if nav.path_index >= len(nav.path_world) - 1:
+                    # Final target reached
+                    nav.should_follow_path = False
+                else:
+                    nav.path_index += 1
 
             nav.prev_x_est = np.array(nav.prev_x_est)
 
-            u_l = np.clip(int(input_left / MMS_PER_MOTOR_SPEED), -500, 500)
-            u_r = np.clip(int(input_right / MMS_PER_MOTOR_SPEED), -500, 500)
-            nav.node.send_send_events({"requestspeed": [u_l, u_r]})
+            speed_left_target = np.clip(int(input_left / MMS_PER_MOTOR_SPEED), -500, 500)
+            speed_right_target = np.clip(int(input_right / MMS_PER_MOTOR_SPEED), -500, 500)
+
+        nav.node.send_send_events({"requestspeed": [speed_left_target, speed_right_target]})
 
         if nav.target_found:
             cv2.drawMarker(nav.img_map, position=nav.target_position.astype(np.int32), color=(0, 255, 0),
                            markerSize=10, markerType=cv2.MARKER_CROSS, thickness=2, line_type=cv2.LINE_AA)
-            cv2.circle(nav.img_map, center=nav.target_position.astype(np.int32), radius=50, color=(0, 255, 0),
-                       thickness=2,
-                       lineType=cv2.LINE_AA)
+            cv2.circle(nav.img_map, center=nav.target_position.astype(np.int32), radius=TARGET_RADIUS_PX,
+                       color=(0, 255, 0), thickness=2, lineType=cv2.LINE_AA)
 
         if nav.graph is not None:
             draw_static_graph(nav.img_map, nav.graph, nav.regions)
-            if len(nav.path_image) >= 2 and nav.free_robot_position is not None and nav.free_target_position is not None:
-                draw_path(nav.img_map, nav.graph, nav.path_image, nav.stored_robot_position, nav.free_robot_position,
+            if len(nav.path_image_space) >= 2 and nav.free_robot_position is not None and nav.free_target_position is not None:
+                draw_path(nav.img_map, nav.graph, nav.path_image_space, nav.stored_robot_position,
+                          nav.free_robot_position,
                           nav.stored_target_position, nav.free_target_position)
 
     nav.map_rgba_f32[:, :, 2::-1] = nav.img_map / 255.0
@@ -413,8 +411,8 @@ def main():
     FRAME_ASPECT_RATIO = FRAME_WIDTH / FRAME_HEIGHT
     MAP_ASPECT_RATIO = MAP_WIDTH_PX / MAP_HEIGHT_PX
 
-    # camera_matrix, distortion_coeffs = calibrate_camera(frame_width, frame_height)
-    # store_to_json('./camera.json', camera_matrix, distortion_coeffs)
+    # camera_matrix, distortion_coeffs = calibrate_camera(FRAME_WIDTH, FRAME_HEIGHT)
+    # store_camera_to_json('./camera.json', camera_matrix, distortion_coeffs)
     # return
     camera_matrix, distortion_coeffs = load_camera_from_json('./camera.json')
     new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs,
@@ -484,7 +482,7 @@ def main():
             dpg.set_value('tag_frame_texture', frame_rgba_f32.flatten())
 
         resize_image_to_fit_window('tag_camera_window', 'tag_frame_image', FRAME_ASPECT_RATIO)
-        resize_plot_to_fit_window('tag_map_window', 'tag_map_plot', MAP_ASPECT_RATIO)
+        resize_image_to_fit_window('tag_map_window', 'tag_map_image', MAP_ASPECT_RATIO)
 
         dpg.render_dearpygui_frame()
 

@@ -41,21 +41,21 @@ def get_obstacle_mask(img: np.ndarray, robot_position: Optional[np.ndarray],
     if their position is not None.
     """
 
-    threshold = 150
+    threshold = 120
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
 
     # Mask out the robot, target and corner markers, in order to not consider them as obstacles
     if robot_position is not None:
-        cv2.circle(img, center=robot_position.astype(np.int32), radius=ROBOT_RADIUS_PX, color=[0], thickness=-1)
+        cv2.circle(img, center=robot_position.astype(np.int32), radius=ROBOT_MASK_RADIUS_PX, color=[0], thickness=-1)
     if target_position is not None:
-        cv2.circle(img, center=target_position.astype(np.int32), radius=TARGET_RADIUS_PX, color=[0], thickness=-1)
-    cv2.rectangle(img, pt1=(0, 0), pt2=(MARKER_SIZE_PX, MARKER_SIZE_PX), color=[0], thickness=-1)
-    cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_SIZE_PX, 0), pt2=(MAP_WIDTH_PX, MARKER_SIZE_PX), color=[0],
+        cv2.circle(img, center=target_position.astype(np.int32), radius=TARGET_MASK_RADIUS_PX, color=[0], thickness=-1)
+    cv2.rectangle(img, pt1=(0, 0), pt2=(MARKER_MASK_SIZE_PX, MARKER_MASK_SIZE_PX), color=[0], thickness=-1)
+    cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_MASK_SIZE_PX, 0), pt2=(MAP_WIDTH_PX, MARKER_MASK_SIZE_PX), color=[0],
                   thickness=-1)
-    cv2.rectangle(img, pt1=(0, MAP_HEIGHT_PX - MARKER_SIZE_PX), pt2=(MARKER_SIZE_PX, MAP_HEIGHT_PX), color=[0],
+    cv2.rectangle(img, pt1=(0, MAP_HEIGHT_PX - MARKER_MASK_SIZE_PX), pt2=(MARKER_MASK_SIZE_PX, MAP_HEIGHT_PX), color=[0],
                   thickness=-1)
-    cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_SIZE_PX, MAP_HEIGHT_PX - MARKER_SIZE_PX),
+    cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_MASK_SIZE_PX, MAP_HEIGHT_PX - MARKER_MASK_SIZE_PX),
                   pt2=(MAP_WIDTH_PX, MAP_HEIGHT_PX), color=[0], thickness=-1)
 
     # Filter isolated obstacle pixels
