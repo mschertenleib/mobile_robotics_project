@@ -208,7 +208,7 @@ def build_graph(regions: list[list[np.ndarray]]) -> Graph:
 
     # Reserve source (robot) and target vertices at the end of the graph lists. This dynamic part of the graph is
     # updated separately, since this update is done much more frequently than the full graph build.
-    graph.vertices += [[], []]
+    graph.vertices += [np.array([]), np.array([])]
     graph.adjacency += [[], []]
 
     return graph

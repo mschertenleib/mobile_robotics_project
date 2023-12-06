@@ -124,7 +124,7 @@ def build_dynamic_graph_and_plan_path(nav: Navigator):
                 [transform_affine(nav.image_to_world, nav.graph.vertices[nav.path_image_space[i]]) for i in
                  range(1, len(nav.path_image_space))])
         else:
-            nav.path_world = np.array([])
+            nav.path_world = None
         nav.path_index = 0
 
 
@@ -381,7 +381,8 @@ def run_navigation(nav: Navigator):
 
         if nav.graph is not None:
             draw_static_graph(nav.img_map, nav.graph, nav.regions)
-            if len(nav.path_image_space) >= 2 and nav.free_robot_position is not None and nav.free_target_position is not None:
+            if nav.path_world is not None and len(
+                    nav.path_image_space) >= 2 and nav.free_robot_position is not None and nav.free_target_position is not None:
                 draw_path(nav.img_map, nav.graph, nav.path_image_space, nav.stored_robot_position,
                           nav.free_robot_position,
                           nav.stored_target_position, nav.free_target_position)
