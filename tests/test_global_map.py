@@ -5,31 +5,6 @@ g_target = (120, 730)
 g_source = (200, 100)
 
 
-# NOTE: we don't use the get_obstacle_mask() from image_processing.py because that one also deals with masking out the
-# robot etc.
-def get_obstacle_mask(img: np.ndarray) -> np.ndarray:
-    """
-    Returns a binary obstacle mask of the given color image, where 1 represents an obstacle.
-    A border is also added.
-    """
-
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    threshold = 150
-    _, img = cv2.threshold(img, threshold, 1, cv2.THRESH_BINARY_INV)
-
-    # Create borders
-    img[:, 0] = 1
-    img[:, -1] = 1
-    img[0, :] = 1
-    img[-1, :] = 1
-
-    dilation_size_px = 50
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_size_px, dilation_size_px))
-    img = cv2.dilate(img, kernel)
-
-    return img
-
-
 def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray]):
     """
     Draw positive orientation as green, negative as red;
@@ -46,11 +21,10 @@ def draw_contour_orientations(img: np.ndarray, contours: list[np.ndarray]):
 
 
 def main():
-    # Note: the minimum distance to any obstacle is 'kernel_size - approx_poly_epsilon'
-    approx_poly_epsilon = 2
     color_image = cv2.imread('../images/map_divided.png')
-    obstacle_mask = get_obstacle_mask(color_image)
+    obstacle_mask = get_obstacle_mask(color_image, robot_position=None, target_position=None, mask_corner_markers=False)
 
+    approx_poly_epsilon = 2
     regions = extract_contours(obstacle_mask, approx_poly_epsilon)
 
     all_contours = [contour for region in regions for contour in region]
@@ -59,17 +33,12 @@ def main():
     free_space[:] = (64, 64, 192)
     cv2.drawContours(free_space, all_contours, contourIdx=-1, color=(255, 255, 255), thickness=-1)
 
-    # TODO: take the regions into account when building the graph (for performance), but it is probably better
-    #  to make only one Graph object
     graph = build_graph(regions)
 
     cv2.namedWindow('main', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('main', color_image.shape[1], color_image.shape[0])
 
     while True:
-        # TODO: take the regions into account when building the graph (for performance), but it is probably better
-        #  to make only one Graph object
-
         free_source, free_target = update_graph(graph, regions, np.array(g_source), np.array(g_target))
         path = dijkstra(graph.adjacency, Graph.SOURCE, Graph.TARGET)
 
@@ -84,6 +53,7 @@ def main():
         cv2.imshow('main', img)
         if cv2.waitKey(1) == 27:
             break
+
     cv2.destroyAllWindows()
 
 

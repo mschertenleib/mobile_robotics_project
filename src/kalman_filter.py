@@ -18,11 +18,11 @@ def kalman_filter(measurements: Optional[np.ndarray], mu_km: np.ndarray, sig_km:
     angular_speed = (speed_right - speed_left) / ROBOT_WHEEL_SPACING
     delta_angle = angular_speed * EFFECTIVE_SAMPLING_TIME
     # Prediction through the a priori estimate
-    x_est = mu_km[0, 0]
-    y_est = mu_km[1, 0]
-    angle_est = mu_km[2, 0]
+    x_est = mu_km[0]
+    y_est = mu_km[1]
+    angle_est = mu_km[2]
     # Estimated mean of the state
-    mu_k_pred = np.array([[0.0], [0.0], [0.0]])
+    mu_k_pred = np.zeros(3)
     mu_k_pred[0] = x_est + tangential_speed * EFFECTIVE_SAMPLING_TIME * -np.sin(angle_est + delta_angle)
     mu_k_pred[1] = y_est + tangential_speed * EFFECTIVE_SAMPLING_TIME * np.cos(angle_est + delta_angle)
     mu_k_pred[2] = angle_est + delta_angle
@@ -45,6 +45,13 @@ def kalman_filter(measurements: Optional[np.ndarray], mu_km: np.ndarray, sig_km:
 
     # Innovation / measurement residual
     i = y - mu_k_pred
+
+    # Correctly handle the case where the angle difference is discontinuous
+    if i[2] < -np.pi:
+        i[2] = 2 * np.pi + i[2]
+    elif i[2] > np.pi:
+        i[2] = - 2 * np.pi + i[2]
+
     # Measurement prediction covariance
     S = sig_k_pred + KALMAN_R
 

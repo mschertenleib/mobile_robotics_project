@@ -58,8 +58,10 @@ def segment_intersects_contours(pt1: np.ndarray, pt2: np.ndarray, contours: list
     Checks for an intersection between the open segment ]pt1---pt2[ and all contours
     """
     for contour in contours:
+        # Intersect each segment from vertex[i] to vertex[i+1]
         if segments_intersect(pt1, pt2, contour[:-1], contour[1:]):
             return True
+        # Intersect the last segment between the last vertex and the first one
         if segments_intersect(pt1, pt2, np.array([contour[-1]]), np.array([contour[0]])):
             return True
     return False
@@ -70,16 +72,16 @@ def extract_contours(obstacle_mask: np.ndarray, epsilon: float) -> list[list[np.
     Get a list of contour regions from the given obstacle_mask, using the given epsilon for polygon approximation.
     Each contour region is a list of contours, where the first one is the outline of a region of free space,
     and subsequent ones are outlines of obstacles enclosed within that region (or, equivalently, holes in the region).
-    The orientation of the region outline is negative (left-hand rule), and the orientation of the outline of
+    The orientation of the region outline is negative (using left-hand rule), and the orientation of the outline of
     holes within the region is positive.
     """
 
     # Inverting the mask means we get the contours of free regions instead of the contours of obstacles
-    inverted_mask = 1 - obstacle_mask
+    free_mask = 1 - obstacle_mask
 
     # NOTE: we assume the orientation of retrieved contours is as explained above. This is not explicitly stated in the
     # OpenCV documentation, but seems to be the case
-    raw_contours, raw_hierarchy = cv2.findContours(inverted_mask, mode=cv2.RETR_CCOMP,
+    raw_contours, raw_hierarchy = cv2.findContours(free_mask, mode=cv2.RETR_CCOMP,
                                                    method=cv2.CHAIN_APPROX_SIMPLE)
     approx_contours = [cv2.approxPolyDP(contour, epsilon=epsilon, closed=True) for contour in raw_contours]
 
@@ -102,6 +104,11 @@ def extract_contours(obstacle_mask: np.ndarray, epsilon: float) -> list[list[np.
 
 
 def extract_convex_vertices(contours: list[np.ndarray]) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+    """
+    From the given list of contours, extract a list of all the convex vertices, as well as a list of vectors connecting
+    the vertex to its previous neighbor on the contour (to_prev), and a list of vectors connecting the vertex to its
+    next neighbor on the contour (to_next).
+    """
     vertices = []
     to_prev = []
     to_next = []
@@ -118,7 +125,13 @@ def extract_convex_vertices(contours: list[np.ndarray]) -> tuple[list[np.ndarray
 
 def extract_static_adjacency(contours: list[np.ndarray], vertices: list[np.ndarray], to_prev: list[np.ndarray],
                              to_next: list[np.ndarray]) -> list[list[Edge]]:
+    """
+    From the contours, and the three lists returned from extract_convex_vertices(), get the adjacency list of the graph.
+    The adjacency list contains, for each vertex, a list of edges to its connected neighbors in the graph. Each edge
+    stores the index of the neighbor vertex, as well as its length.
+    """
     adjacency = [[] for _ in range(len(vertices))]
+
     for i in range(len(vertices)):
         for j in range(i + 1, len(vertices)):
 
@@ -151,12 +164,18 @@ def extract_static_adjacency(contours: list[np.ndarray], vertices: list[np.ndarr
 
 def extract_dynamic_edges(regions: list[list[np.ndarray]], vertices: list[np.ndarray], to_prev: list[np.ndarray],
                           to_next: list[np.ndarray], point: np.ndarray) -> list[Edge]:
+    """
+    Retrieve the list of connections between "point" and vertices of the graph. This is destined to be used with the
+    robot or target position as "point".
+    """
+
     # NOTE: we need to check for an intersection with all contours from all regions, because we consider all vertices
     # of the graph, not only those in the same region as the point. If we wanted to consider only the latter (which we
     # could), we would need a way to extract the subset of vertices from the graph corresponding to our region.
     # Alternatively, and perhaps more intuitively, building one graph per region would give the same benefits and might
     # be interesting. This however is fundamentally just an optimization over what we already have here, and goes beyond
     # the scope of what is needed for this project.
+
     all_contours = [contour for region in regions for contour in region]
 
     edges = []
@@ -183,6 +202,10 @@ def extract_dynamic_edges(regions: list[list[np.ndarray]], vertices: list[np.nda
 
 
 def build_graph(regions: list[list[np.ndarray]]) -> Graph:
+    """
+    From the given contours for all regions, build the static part of the graph
+    """
+
     graph = Graph()
 
     # For the current region being processed, keep track of the index of its first vertex in the graph
@@ -261,6 +284,11 @@ def should_add_source_to_target_edge(regions: list[list[np.ndarray]], free_sourc
                                      source_contour_index: int, source_vertex_index: int, free_target: np.ndarray,
                                      target_region_index: int, target_contour_index: int,
                                      target_vertex_index: int) -> bool:
+    """
+    Checks if the source and target should be directly connected. This is a separate function because we need extra
+    logic if source and target were projected to contour vertices.
+    """
+
     # If the source and target do not lie within the same region, they obviously cannot be connected
     if source_region_index != target_region_index:
         return False
@@ -342,8 +370,8 @@ def draw_path(img: np.ndarray, graph: Graph, path: list[int], source: np.ndarray
 
 def dijkstra(adjacency_list: list[list[Edge]], source: int, target: int) -> list[int]:
     """
-    source: the starting vertex of the search
-    target: the target vertex of the search
+    source: the starting vertex index of the search
+    target: the target vertex index of the search
     """
     vertex_count = len(adjacency_list)
     assert vertex_count > 0
@@ -416,7 +444,7 @@ def distance_to_polyline(point: np.ndarray, vertices: np.ndarray) -> float:
             if distance < min_distance:
                 min_distance = distance
 
-        # Else the projection of the point on the segment lies on a vertex or beyond one of the vertices
+        # Else the projection of the point on the line lies on a vertex or beyond one of the vertices
         else:
             distance = np.linalg.norm(to_vertex_1)
             if distance < min_distance:

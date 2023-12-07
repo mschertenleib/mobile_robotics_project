@@ -28,17 +28,22 @@ def get_world_to_image_matrix(width_mm: float, height_mm: float, width_px: int, 
 
 
 def get_perspective_transform(map_corners: np.ndarray, dst_width: int, dst_height: int) -> np.ndarray:
+    """
+    From the map corner positions and the desired width and height of the map in pixels, get a perspective transform
+    matrix.
+    """
     pts_src = map_corners.astype(np.float32)
     pts_dst = np.float32([[0, 0], [dst_width, 0], [dst_width, dst_height], [0, dst_height]])
     return cv2.getPerspectiveTransform(pts_src, pts_dst)
 
 
 def get_obstacle_mask(img: np.ndarray, robot_position: Optional[np.ndarray],
-                      target_position: Optional[np.ndarray]) -> np.ndarray:
+                      target_position: Optional[np.ndarray], mask_corner_markers: bool = True) -> np.ndarray:
     """
     Returns a binary obstacle mask of the given color image, where 1 represents an obstacle.
-    A border is also added. The four corner markers are not considered obstacles, as well as the robot and the target,
-    if their position is not None.
+    A border is also added.
+    If mask_corner_markers is set, the four corner markers are masked out and not considered obstacles.
+    If the robot and/or the target position are not None, they are masked out and not considered obstacles.
     """
 
     threshold = 120
@@ -50,13 +55,16 @@ def get_obstacle_mask(img: np.ndarray, robot_position: Optional[np.ndarray],
         cv2.circle(img, center=robot_position.astype(np.int32), radius=ROBOT_MASK_RADIUS_PX, color=[0], thickness=-1)
     if target_position is not None:
         cv2.circle(img, center=target_position.astype(np.int32), radius=TARGET_MASK_RADIUS_PX, color=[0], thickness=-1)
-    cv2.rectangle(img, pt1=(0, 0), pt2=(MARKER_MASK_SIZE_PX, MARKER_MASK_SIZE_PX), color=[0], thickness=-1)
-    cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_MASK_SIZE_PX, 0), pt2=(MAP_WIDTH_PX, MARKER_MASK_SIZE_PX), color=[0],
-                  thickness=-1)
-    cv2.rectangle(img, pt1=(0, MAP_HEIGHT_PX - MARKER_MASK_SIZE_PX), pt2=(MARKER_MASK_SIZE_PX, MAP_HEIGHT_PX), color=[0],
-                  thickness=-1)
-    cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_MASK_SIZE_PX, MAP_HEIGHT_PX - MARKER_MASK_SIZE_PX),
-                  pt2=(MAP_WIDTH_PX, MAP_HEIGHT_PX), color=[0], thickness=-1)
+    if mask_corner_markers:
+        cv2.rectangle(img, pt1=(0, 0), pt2=(MARKER_MASK_SIZE_PX, MARKER_MASK_SIZE_PX), color=[0], thickness=-1)
+        cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_MASK_SIZE_PX, 0), pt2=(MAP_WIDTH_PX, MARKER_MASK_SIZE_PX),
+                      color=[0],
+                      thickness=-1)
+        cv2.rectangle(img, pt1=(0, MAP_HEIGHT_PX - MARKER_MASK_SIZE_PX), pt2=(MARKER_MASK_SIZE_PX, MAP_HEIGHT_PX),
+                      color=[0],
+                      thickness=-1)
+        cv2.rectangle(img, pt1=(MAP_WIDTH_PX - MARKER_MASK_SIZE_PX, MAP_HEIGHT_PX - MARKER_MASK_SIZE_PX),
+                      pt2=(MAP_WIDTH_PX, MAP_HEIGHT_PX), color=[0], thickness=-1)
 
     # Filter isolated obstacle pixels
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))

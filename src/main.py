@@ -1,10 +1,10 @@
+import time
 from threading import Timer
 
 import dearpygui.dearpygui as dpg
-from tdmclient import aw
-from tdmclient.atranspiler import ATranspiler
+from tdmclient import ClientAsync, aw
 
-from camera_calibration import *
+from calibrate_camera import *
 from controller import *
 from global_map import *
 from image_processing import *
@@ -19,9 +19,9 @@ class Navigator:
     Holds the persistent state needed in the navigation timer callback
     """
 
-    def __init__(self, client, node):
+    def __init__(self, node):
         self.start_time = time.time()
-        self.node = None
+        self.node = node
         self.requires_first_measurement = True
         self.map_found = False
         self.should_follow_path = False
@@ -49,26 +49,14 @@ class Navigator:
         self.free_robot_position = np.zeros(2)
         self.stored_target_position = np.zeros(2)
         self.free_target_position = np.zeros(2)
-        self.prev_x_est = np.zeros((3, 1))
+        self.prev_x_est = np.zeros(3)
         self.prev_P_est = KALMAN_Q
         # Data for the plots
         self.sample_time_history = []
         self.estimated_pose_history = []
         self.measured_pose_history = []
         # Local navigation
-        self.client = client
-        self.node = node
-        self.motor_speed = 200  # speed of the robot
-        self.LTobst = 5  # low obstacle threshold to switch state 1->0
-        self.HTobst = 17  # high obstacle threshold to switch state 0->1
-        self.obst_gain = 7  # /100 (actual gain: 15/100=0.15)
         self.num_samples_since_last_obstacle = -1
-        self.was_avoiding = False  # Actual state of the robot: 0->global navigation, 1->obstacle avoidance
-        self.case = 0  # Actual case of obstacle avoidance: 0-> left obstacle, 1-> right obstacle, 2-> obstacle in front
-        # we randomly generate the first bypass choice of the robot when he encounters an obstacle in front of him
-        self.side = bool(np.random.randint(2))
-        self.rotation_time = 1  # 1ms time before rotation
-        self.step_back_time = 1  # 1ms time during which i step back
 
 
 class RepeatTimer(Timer):
@@ -81,19 +69,20 @@ class RepeatTimer(Timer):
             wait_time = self.interval - (time_end_function - time_start_function)
 
 
-async def compile_run_python_for_thymio(node):
-    await node.register_events([("requestspeed", 2)])
+async def compile_run_thymio_program(node):
+    thymio_program_aseba = """
+    timer.period[0] = 1000
 
-    with open('thymio_program.py', 'r') as file:
-        thymio_program_python = file.read()
-        thymio_program_aseba = ATranspiler.simple_transpile(thymio_program_python)
-        compilation_result = await node.compile(thymio_program_aseba)
-        if compilation_result is None:
-            print('Aseba compilation success')
-        else:
-            print('Aseba compilation error :', compilation_result)
-            return False
-        await node.run()
+    onevent timer0
+        leds.top = [0, 0, 0]
+    """
+    compilation_result = await node.compile(thymio_program_aseba)
+    if compilation_result is None:
+        print('Aseba compilation success')
+    else:
+        print('Aseba compilation error :', compilation_result)
+        return False
+    await node.run()
 
     return True
 
@@ -288,20 +277,25 @@ def run_navigation(nav: Navigator):
     if nav.map_found:
         corners, ids, rejected = nav.detector.detectMarkers(nav.frame_map)
 
+        # Detect the robot
         nav.robot_found, nav.robot_position, nav.robot_direction = detect_robot(corners, ids)
 
+        # Detect the target
         nav.target_found, target_position = detect_target(corners, ids)
+        # If target moved, replan the path
         if nav.target_found and nav.target_position is not None and np.linalg.norm(
                 target_position - nav.target_position) >= TARGET_DELTA_TO_PLAN_PATH_AGAIN_MM:
             should_replan_path = True
         nav.target_position = target_position
 
         if nav.robot_found:
+            # Get the robot position in world space
             robot_position_world = transform_affine(nav.image_to_world, nav.robot_position)
             robot_x = robot_position_world.item(0)
             robot_y = robot_position_world.item(1)
             robot_theta = np.arctan2(-nav.robot_direction[0], -nav.robot_direction[1])
 
+            # Draw the robot as detected by the camera (in red)
             cv2.drawMarker(nav.img_map, position=nav.robot_position.astype(np.int32), color=(0, 0, 255), thickness=2,
                            markerSize=10,
                            markerType=cv2.MARKER_CROSS, line_type=cv2.LINE_AA)
@@ -310,7 +304,7 @@ def run_navigation(nav: Navigator):
             cv2.polylines(nav.img_map, [outline], isClosed=True, color=(0, 0, 255), thickness=2,
                           lineType=cv2.LINE_AA)
 
-            measurements = np.array([[robot_x], [robot_y], [robot_theta]])
+            measurements = np.array([robot_x, robot_y, robot_theta])
             if nav.requires_first_measurement:
                 nav.prev_x_est[:] = measurements
                 nav.requires_first_measurement = False
@@ -321,28 +315,32 @@ def run_navigation(nav: Navigator):
         speed_left = int(nav.node.v.motor.left.speed) * MMS_PER_MOTOR_SPEED
         speed_right = int(nav.node.v.motor.right.speed) * MMS_PER_MOTOR_SPEED
         new_x_est, new_P_est = kalman_filter(measurements, nav.prev_x_est, nav.prev_P_est, speed_left, speed_right)
-        if np.linalg.norm(new_x_est.flatten()[:2] - nav.prev_x_est.flatten()[:2]) >= ROBOT_DELTA_TO_PLAN_PATH_AGAIN_MM:
+
+        # If there was a big jump in robot position (kidnapping, or the camera was uncovered and corrected the
+        # estimation), then re-plan the path
+        if np.linalg.norm(new_x_est[:2] - nav.prev_x_est[:2]) >= ROBOT_DELTA_TO_PLAN_PATH_AGAIN_MM:
             should_replan_path = True
 
         nav.prev_x_est = new_x_est
         nav.prev_P_est = new_P_est
-        estimated_state = new_x_est.flatten()
 
+        # Update plot data
         nav.sample_time_history.append(time.time() - nav.start_time)
         if measurements is not None:
-            nav.measured_pose_history.append(measurements.flatten())
+            nav.measured_pose_history.append(measurements.copy())
             nav.measured_pose_history[-1][2] = np.rad2deg(nav.measured_pose_history[-1][2])
         else:
             nav.measured_pose_history.append(np.zeros(3))
-        nav.estimated_pose_history.append(estimated_state.copy())
+        nav.estimated_pose_history.append(new_x_est.copy())
         nav.estimated_pose_history[-1][2] = np.rad2deg(nav.estimated_pose_history[-1][2])
         update_plots(nav)
 
+        # Draw the robot as estimated (in green)
         cv2.drawMarker(nav.img_map, position=transform_affine(nav.world_to_image, np.array(
-            [estimated_state[0], estimated_state[1]])).astype(np.int32),
+            [new_x_est[0], new_x_est[1]])).astype(np.int32),
                        color=(64, 192, 64), thickness=2, markerSize=10,
                        markerType=cv2.MARKER_CROSS, line_type=cv2.LINE_AA)
-        outline = get_robot_outline(estimated_state.item(0), estimated_state.item(1), estimated_state.item(2))
+        outline = get_robot_outline(new_x_est.item(0), new_x_est.item(1), new_x_est.item(2))
         outline = np.array([transform_affine(nav.world_to_image, pt) for pt in outline], dtype=np.int32)
         cv2.polylines(nav.img_map, [outline], isClosed=True, color=(64, 192, 64), thickness=2,
                       lineType=cv2.LINE_AA)
@@ -352,46 +350,50 @@ def run_navigation(nav: Navigator):
 
         speed_left_target, speed_right_target = 0, 0
 
+        # If following a path, do Astolfi control
         if nav.should_follow_path and nav.path_world is not None and len(nav.path_world) > 0:
-            nav.prev_x_est = nav.prev_x_est.tolist()
-            goal_state = [nav.path_world[nav.path_index, 0], nav.path_world[nav.path_index, 1]]
+            # The goal is the current point being tracked on the path
+            goal_state = np.array([nav.path_world[nav.path_index, 0], nav.path_world[nav.path_index, 1]])
 
-            input_left, input_right, goal_reached = astolfi_control(np.array(nav.prev_x_est).flatten(), goal_state)
+            input_left, input_right, goal_reached = astolfi_control(nav.prev_x_est, goal_state)
             if goal_reached:
                 if nav.path_index >= len(nav.path_world) - 1:
-                    # Final target reached
+                    # Final target reached. Stop path following, so that we have to click on "GO!" again if we want to
+                    # track a new path
                     nav.should_follow_path = False
                 else:
+                    # Move on to the next point on the path
                     nav.path_index += 1
-
-            nav.prev_x_est = np.array(nav.prev_x_est)
 
             speed_left_target = np.clip(int(input_left / MMS_PER_MOTOR_SPEED), -500, 500)
             speed_right_target = np.clip(int(input_right / MMS_PER_MOTOR_SPEED), -500, 500)
 
+        # Do local obstacle detection
         prox_horizontal = [0] * 5
         for i in range(5):
             prox_horizontal[i] = list(nav.node.v.prox.horizontal)[i]
-
-        obst = [prox_horizontal[0], prox_horizontal[1], prox_horizontal[2], prox_horizontal[3], prox_horizontal[4]]
-
         nav.num_samples_since_last_obstacle = aw(
-            avoid_obstacles(nav.node, nav.client, nav.num_samples_since_last_obstacle, nav.side, obst, nav.HTobst,
-                            nav.LTobst, nav.motor_speed, nav.obst_gain))
+            avoid_obstacles(nav.node, nav.num_samples_since_last_obstacle, prox_horizontal))
+
+        # If we recently saw an obstacle (i.e. more recently than 3 SAMPLING_TIME ago), do not yet switch to path
+        # following, as to hopefully let the robot clear the obstacle.
         if 0 <= nav.num_samples_since_last_obstacle <= 3:
             nav.num_samples_since_last_obstacle += 1
         elif nav.num_samples_since_last_obstacle > 3:
             nav.num_samples_since_last_obstacle = -1
 
+        # If no obstacle was recently detected, send the controller's desired speeds to the motors
         elif nav.num_samples_since_last_obstacle == -1:
             nav.node.send_set_variables(set_motor_speed(speed_left_target, speed_right_target))
 
+        # Draw the target
         if nav.target_found:
             cv2.drawMarker(nav.img_map, position=nav.target_position.astype(np.int32), color=(0, 255, 0),
                            markerSize=10, markerType=cv2.MARKER_CROSS, thickness=2, line_type=cv2.LINE_AA)
             cv2.circle(nav.img_map, center=nav.target_position.astype(np.int32), radius=TARGET_RADIUS_PX,
                        color=(0, 255, 0), thickness=2, lineType=cv2.LINE_AA)
 
+        # Draw the graph and the path
         if nav.graph is not None and nav.graph.vertices[Graph.SOURCE].shape[0] == 2:
             draw_static_graph(nav.img_map, nav.graph, nav.regions)
             if nav.path_world is not None and len(
@@ -414,33 +416,40 @@ def main():
     FRAME_ASPECT_RATIO = FRAME_WIDTH / FRAME_HEIGHT
     MAP_ASPECT_RATIO = MAP_WIDTH_PX / MAP_HEIGHT_PX
 
-    # camera_matrix, distortion_coeffs = calibrate_camera(FRAME_WIDTH, FRAME_HEIGHT)
-    # store_camera_to_json('./camera.json', camera_matrix, distortion_coeffs)
-    # return
-    camera_matrix, distortion_coeffs = load_camera_from_json('./camera.json')
+    # Load calibration parameters
+    try:
+        camera_matrix, distortion_coeffs = load_camera_from_json('./camera.json')
+    except:
+        print('Failed to open, read or parse file "./camera.json". To generate this file, please run '
+              '"calibrate_camera.py"')
+        return
+
     new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(camera_matrix, distortion_coeffs,
                                                            (MAP_WIDTH_PX, MAP_HEIGHT_PX), 0,
                                                            (MAP_WIDTH_PX, MAP_HEIGHT_PX))
 
+    # Launch video capture thread
     video_thread = VideoThread(FRAME_WIDTH, FRAME_HEIGHT)
 
+    # Connect to the robot, compile and run dummy program (just so we are 100% sure that nothing is running on the
+    # robot), since everything is done via the ClientAsync
     client = ClientAsync()
     node = aw(client.wait_for_node())
     aw(node.lock())
-
-    compile_ok = aw(compile_run_python_for_thymio(node))
+    compile_ok = aw(compile_run_thymio_program(node))
     if not compile_ok:
         aw(node.unlock())
-
     aw(node.wait_for_variables())
 
-    nav = Navigator(client, node)
+    # Setup navigation state
+    nav = Navigator(node)
 
     detector_params = cv2.aruco.DetectorParameters()
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
     detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
     nav.detector = detector
 
+    # Start navigation timer
     timer = RepeatTimer(SAMPLING_TIME, run_navigation, args=[nav])
     timer.start()
 

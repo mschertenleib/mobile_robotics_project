@@ -1,7 +1,11 @@
 from parameters import *
 
 
-def astolfi_control(state, goal_state):
+def astolfi_control(state, goal_state) -> tuple[float, float, bool]:
+    """
+    Returns the left desired speed, right desired speed and whether the goal was reached
+    """
+
     Kp = 8  # > 0
     Ka = 75  # > Kp
     goal_radius = 20
@@ -20,10 +24,9 @@ def astolfi_control(state, goal_state):
     if rho <= goal_radius:
         return 0, 0, True
 
-    gain = 140
     power = 1/4
-    factor = gain / (goal_radius**power)
-    v = Kp * factor * rho**power
+    K_power = 140 / (goal_radius**power)
+    v = Kp * K_power * rho**power
     # v = Kp * rho
     omega = Ka * alpha
 
