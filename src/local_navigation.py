@@ -22,37 +22,32 @@ def set_motor_speed(left_speed, right_speed):
     }
 
 
-# Function to set Thymio back
+# Function to set Thymio to specific left and right speed
 async def move_forward(node, client, motor_speedl, motor_speedr):
     # Set the motor speeds in opposite signs to induce step back
     await node.set_variables(set_motor_speed(motor_speedl, motor_speedr))
-
 
 # Function to rotate Thymio to the right
 async def turn_right(node, client, motor_speed):
     # Set the motor speeds in opposite directions to induce rotation
     await node.set_variables(set_motor_speed(motor_speed, -motor_speed))
 
-
 # Function to rotate Thymio to the left
 async def turn_left(node, client, motor_speed):
     # Set the motor speeds in opposite directions to induce rotation
     await node.set_variables(set_motor_speed(-motor_speed, motor_speed))
 
-
-# Function to set Thymio back for a certain period of time
+# Function to set Thymio back 
 async def step_back(node, client, motor_speed):
     # Set the motor speeds in opposite signs to induce step back
     await node.set_variables(set_motor_speed(-motor_speed, -motor_speed))
 
-
 # Function to detect whether the Thymio is in goal pursuit mode or obstacle avoidance mode and avoid obstacles. 
-async def avoid_obstacles(node, client, num_samples_since_last_obstacle, side, obst, HTobst, LTobst, motor_speed,
-                          obst_gain) -> int:
-    # FIXME: comment
-
+async def avoid_obstacles(node, client, num_samples_since_last_obstacle, side, obst, HTobst, LTobst, motor_speed,obst_gain) -> int:
+    """# FIXME: comment
+    
+    """
     # Obstacle detection using proximals sensors
-
     # If an obstacle is detected, we switch to obstacle avoidance mode instead of goal tracking mode.
     if ((obst[0] > HTobst or obst[1] > HTobst) and (obst[0] > obst[2] or obst[1] > obst[2])):
         # Different cases are distinguished
@@ -72,19 +67,9 @@ async def avoid_obstacles(node, client, num_samples_since_last_obstacle, side, o
         case = 2
     else:
         case = 3
+        
 
-    # elif state == 1:
-    #    if obst[0] < LTobst:
-    #        if obst[4] < LTobst:
-    #            if obst[2] < LTobst:
-    #                # If obstacle is not detected, we switch from obstacle avoidance mode to goal tracking mode.
-    #                state = 0
-
-    # Obstacle avoidance   
-    # if state == 0:
-    # goal tracking: turn toward the goal
-    # await move_forward(node, client, motor_speed, motor_speed)
-
+    # Obstacle avoidance
     if case == 0 or case == 1:
         # Obstacle is to your left or right.
         # Obstacle avoidance: accelerate the wheel near the obstacle to turn in the opposite direction to the obstacle.
