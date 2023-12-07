@@ -19,7 +19,7 @@ class Navigator:
     Holds the persistent state needed in the navigation timer callback
     """
 
-    def __init__(self):
+    def __init__(self, client, node):
         self.start_time = time.time()
         self.node = None
         self.requires_first_measurement = True
@@ -55,24 +55,20 @@ class Navigator:
         self.sample_time_history = []
         self.estimated_pose_history = []
         self.measured_pose_history = []
-
-
-class LocalNavigator:
-    def __init__(self, client, node):
+        # Local navigation
         self.client = client
         self.node = node
-        self.spped_gain = 2
-        self.motor_speed = 100  # speed of the robot
+        self.motor_speed = 200  # speed of the robot
         self.LTobst = 5  # low obstacle threshold to switch state 1->0
-        self.HTobst = 13  # high obstacle threshold to switch state 0->1
-        self.obst_gain = 15  # /100 (actual gain: 15/100=0.15)
-        self.state = 0  # Actual state of the robot: 0->global navigation, 1->obstacle avoidance
+        self.HTobst = 17  # high obstacle threshold to switch state 0->1
+        self.obst_gain = 7  # /100 (actual gain: 15/100=0.15)
+        self.num_samples_since_last_obstacle = -1
+        self.was_avoiding = False  # Actual state of the robot: 0->global navigation, 1->obstacle avoidance
         self.case = 0  # Actual case of obstacle avoidance: 0-> left obstacle, 1-> right obstacle, 2-> obstacle in front
         # we randomly generate the first bypass choice of the robot when he encounters an obstacle in front of him
         self.side = bool(np.random.randint(2))
         self.rotation_time = 1  # 1ms time before rotation
         self.step_back_time = 1  # 1ms time during which i step back
-        self.prox_horizontal = [0] * 5
 
 
 class RepeatTimer(Timer):
@@ -120,6 +116,7 @@ def build_dynamic_graph_and_plan_path(nav: Navigator):
                                                                          nav.stored_robot_position,
                                                                          nav.stored_target_position)
         nav.path_image_space = dijkstra(nav.graph.adjacency, Graph.SOURCE, Graph.TARGET)
+
         if len(nav.path_image_space) >= 2:
             nav.path_world = np.array(
                 [transform_affine(nav.image_to_world, nav.graph.vertices[nav.path_image_space[i]]) for i in
@@ -372,7 +369,22 @@ def run_navigation(nav: Navigator):
             speed_left_target = np.clip(int(input_left / MMS_PER_MOTOR_SPEED), -500, 500)
             speed_right_target = np.clip(int(input_right / MMS_PER_MOTOR_SPEED), -500, 500)
 
-        nav.node.send_send_events({"requestspeed": [speed_left_target, speed_right_target]})
+        prox_horizontal = [0] * 5
+        for i in range(5):
+            prox_horizontal[i] = list(nav.node.v.prox.horizontal)[i]
+
+        obst = [prox_horizontal[0], prox_horizontal[1], prox_horizontal[2], prox_horizontal[3], prox_horizontal[4]]
+
+        nav.num_samples_since_last_obstacle = aw(
+            avoid_obstacles(nav.node, nav.client, nav.num_samples_since_last_obstacle, nav.side, obst, nav.HTobst,
+                            nav.LTobst, nav.motor_speed, nav.obst_gain))
+        if 0 <= nav.num_samples_since_last_obstacle <= 3:
+            nav.num_samples_since_last_obstacle += 1
+        elif nav.num_samples_since_last_obstacle > 3:
+            nav.num_samples_since_last_obstacle = -1
+
+        elif nav.num_samples_since_last_obstacle == -1:
+            nav.node.send_set_variables(set_motor_speed(speed_left_target, speed_right_target))
 
         if nav.target_found:
             cv2.drawMarker(nav.img_map, position=nav.target_position.astype(np.int32), color=(0, 255, 0),
@@ -380,7 +392,7 @@ def run_navigation(nav: Navigator):
             cv2.circle(nav.img_map, center=nav.target_position.astype(np.int32), radius=TARGET_RADIUS_PX,
                        color=(0, 255, 0), thickness=2, lineType=cv2.LINE_AA)
 
-        if nav.graph is not None:
+        if nav.graph is not None and nav.graph.vertices[Graph.SOURCE].shape[0] == 2:
             draw_static_graph(nav.img_map, nav.graph, nav.regions)
             if nav.path_world is not None and len(
                     nav.path_image_space) >= 2 and nav.free_robot_position is not None and nav.free_target_position is not None:
@@ -390,17 +402,6 @@ def run_navigation(nav: Navigator):
 
     nav.map_rgba_f32[:, :, 2::-1] = nav.img_map / 255.0
     dpg.set_value('tag_map_texture', nav.map_rgba_f32.flatten())
-
-
-def run_local_navigation(loc_nav: LocalNavigator):
-    prox_horizontal = [0] * 5
-    for i in range(5):
-        prox_horizontal[i] = list(loc_nav.node.v.prox.horizontal)[i]
-    obst = [prox_horizontal[0], prox_horizontal[1], prox_horizontal[2], prox_horizontal[3], prox_horizontal[4]]
-
-    aw(avoid_obstacles(loc_nav.node, loc_nav.client, loc_nav.state, loc_nav.side, obst, loc_nav.HTobst,
-                       loc_nav.LTobst, loc_nav.motor_speed, loc_nav.step_back_time, loc_nav.spped_gain,
-                       loc_nav.rotation_time))
 
 
 def main():
@@ -423,29 +424,25 @@ def main():
 
     video_thread = VideoThread(FRAME_WIDTH, FRAME_HEIGHT)
 
-    nav = Navigator()
+    client = ClientAsync()
+    node = aw(client.wait_for_node())
+    aw(node.lock())
+
+    compile_ok = aw(compile_run_python_for_thymio(node))
+    if not compile_ok:
+        aw(node.unlock())
+
+    aw(node.wait_for_variables())
+
+    nav = Navigator(client, node)
 
     detector_params = cv2.aruco.DetectorParameters()
     dictionary = cv2.aruco.extendDictionary(nMarkers=6, markerSize=6)
     detector = cv2.aruco.ArucoDetector(dictionary, detector_params)
     nav.detector = detector
 
-    client = ClientAsync()
-    nav.node = aw(client.wait_for_node())
-    aw(nav.node.lock())
-
-    compile_ok = aw(compile_run_python_for_thymio(nav.node))
-    if not compile_ok:
-        aw(nav.node.unlock())
-
-    aw(nav.node.wait_for_variables())
-
     timer = RepeatTimer(SAMPLING_TIME, run_navigation, args=[nav])
     timer.start()
-
-    loc_nav = LocalNavigator(client, nav.node)
-    local_nav_timer = RepeatTimer(0.1, run_local_navigation, args=[loc_nav])
-    # local_nav_timer.start()
 
     # Create interface
     dpg.create_context()
@@ -489,7 +486,6 @@ def main():
         dpg.render_dearpygui_frame()
 
     timer.cancel()
-    local_nav_timer.cancel()
 
     aw(nav.node.stop())
     aw(nav.node.unlock())
