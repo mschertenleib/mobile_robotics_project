@@ -62,4 +62,10 @@ def kalman_filter(measurements: Optional[np.ndarray], mu_km: np.ndarray, sig_km:
     x_est = mu_k_pred + K @ i
     sig_est = sig_k_pred - K @ sig_k_pred
 
+    # Keep the angle within [-pi, pi]
+    if x_est[2] < -np.pi:
+        x_est[2] = 2 * np.pi + x_est[2]
+    elif x_est[2] > np.pi:
+        x_est[2] = - 2 * np.pi + x_est[2]
+
     return x_est, sig_est
