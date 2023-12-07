@@ -58,17 +58,13 @@ class Navigator:
         # Local navigation
         self.client = client
         self.node = node
-        self.motor_speed = 200  # speed of the robot
-        self.LTobst = 5  # low obstacle threshold to switch state 1->0
-        self.HTobst = 17  # high obstacle threshold to switch state 0->1
-        self.obst_gain = 7  # /100 (actual gain: 15/100=0.15)
+        self.motor_speed = 200   
+        self.HTobst = 17  
+        self.obst_gain = 7  
         self.num_samples_since_last_obstacle = -1
-        self.was_avoiding = False  # Actual state of the robot: 0->global navigation, 1->obstacle avoidance
-        self.case = 0  # Actual case of obstacle avoidance: 0-> left obstacle, 1-> right obstacle, 2-> obstacle in front
-        # we randomly generate the first bypass choice of the robot when he encounters an obstacle in front of him
-        self.side = bool(np.random.randint(2))
-        self.rotation_time = 1  # 1ms time before rotation
-        self.step_back_time = 1  # 1ms time during which i step back
+        self.was_avoiding = False  
+        self.case = 0  
+        self.side = bool(np.random.randint(2)) 
 
 
 class RepeatTimer(Timer):
