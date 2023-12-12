@@ -51,7 +51,10 @@ def main():
         cv2.namedWindow('main', cv2.WINDOW_NORMAL)
         cv2.setMouseCallback('main', mouse_callback)
         cv2.imshow('main', img)
-        if cv2.waitKey(1) == 27:
+        key = cv2.waitKey(1)
+        if key == ord('m'):
+            cv2.imwrite('../images/global_map.png', img)
+        elif key & 0xff == 27:
             break
 
     cv2.destroyAllWindows()
