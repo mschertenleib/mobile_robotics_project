@@ -1,5 +1,8 @@
 .idea
 __pycache__
+.ipynb_checkpoints
+src/__pycache__
+tests/__pycache__
 imgui.ini
 src/imgui.ini
 tests/imgui.ini
